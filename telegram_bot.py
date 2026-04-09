@@ -14,6 +14,7 @@ from datetime import datetime
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ALLOWED_USER_ID = os.getenv("ALLOWED_USER_ID")
 MAX_THREADS = int(os.getenv("MAX_THREADS", "3"))
+SESSION_FILE = "user_sessions.json"
 
 if not TOKEN:
     print("Error: TELEGRAM_BOT_TOKEN environment variable is not set.")
@@ -40,6 +41,27 @@ task_lock = threading.Lock()
 worker_count = 0
 worker_lock = threading.Lock()
 
+# User Sessions State
+user_sessions = {}
+session_lock = threading.Lock()
+
+def load_sessions():
+    global user_sessions
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE, "r") as f:
+                user_sessions = json.load(f)
+        except Exception as e:
+            print(f"Error loading sessions: {e}")
+
+def save_sessions():
+    with session_lock:
+        try:
+            with open(SESSION_FILE, "w") as f:
+                json.dump(user_sessions, f)
+        except Exception as e:
+            print(f"Error saving sessions: {e}")
+
 def send_message(chat_id, text):
     # Telegram has a 4096 character limit per message
     if len(text) > 4000:
@@ -50,17 +72,23 @@ def send_message(chat_id, text):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def call_gemini(prompt):
+def call_gemini(prompt, user_id=None):
     try:
-        # NOTE: Running multiple Gemini instances in the same directory 
-        # with --approval-mode yolo can cause file system race conditions.
+        session_id = None
+        if user_id:
+            with session_lock:
+                session_id = user_sessions.get(str(user_id))
+
         cmd = [
             "gemini",
             "-p", prompt,
-            "--resume", "latest",
             "--approval-mode", "yolo",
             "--output-format", "json"
         ]
+        
+        if session_id:
+            cmd.extend(["--resume", session_id])
+
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         output = result.stdout
@@ -68,6 +96,27 @@ def call_gemini(prompt):
         if start_idx != -1:
             json_str = output[start_idx:]
             data = json.loads(json_str)
+            
+            # After a successful run, Gemini CLI output (if captured) might contain new session info
+            # However, since we can't easily get the new UUID from the JSON output if it's not there,
+            # we rely on the fact that if we resume a session, it stays that session.
+            # If it's a new session, we need to find its UUID.
+            if not session_id:
+                # Get the latest session UUID
+                list_cmd = ["gemini", "--list-sessions"]
+                list_result = subprocess.run(list_cmd, capture_output=True, text=True)
+                # Parse the latest session UUID from output like: 1. prompt (time) [uuid]
+                lines = list_result.stdout.strip().split('\n')
+                if lines:
+                    last_line = lines[-1]
+                    import re
+                    match = re.search(r'\[(.*?)\]', last_line)
+                    if match:
+                        new_uuid = match.group(1)
+                        with session_lock:
+                            user_sessions[str(user_id)] = new_uuid
+                        save_sessions()
+
             return data.get("response", "No response found in JSON.")
         else:
             return f"Error: Could not parse Gemini output.\nStdout: {output}\nStderr: {result.stderr}"
@@ -78,8 +127,7 @@ def worker_thread(worker_id):
     global worker_count
     while True:
         try:
-            # Get a task from the queue
-            task = task_queue.get(timeout=5) # Wait 5 seconds for a task
+            task = task_queue.get(timeout=5)
             
             with task_lock:
                 task.status = "running"
@@ -87,7 +135,7 @@ def worker_thread(worker_id):
                 task.start_time = datetime.now()
             
             print(f"Worker {worker_id} started task: {task.prompt}")
-            response = call_gemini(task.prompt)
+            response = call_gemini(task.prompt, user_id=task.user_id)
             
             with task_lock:
                 task.status = "completed"
@@ -98,12 +146,22 @@ def worker_thread(worker_id):
             task_queue.task_done()
             
         except:
-            # No task found within timeout, terminate worker
             break
 
     with worker_lock:
         worker_count -= 1
-    print(f"Worker {worker_id} terminated (idle).")
+
+def wake_up_thread():
+    """Periodically sends a 'wake up' message if ALLOWED_USER_ID is set."""
+    if not ALLOWED_USER_ID:
+        return
+    
+    while True:
+        # Sleep for 12 hours (43200 seconds)
+        time.sleep(43200)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        msg = f"⏰ Wake up! System check at {now}. I am still running on {HOSTNAME}."
+        send_message(ALLOWED_USER_ID, msg)
 
 def get_updates(offset=None):
     params = {"timeout": 30, "offset": offset}
@@ -116,9 +174,15 @@ def get_updates(offset=None):
 
 def main():
     global worker_count
+    load_sessions()
     print(f"Gemini Telegram Bot running on {HOSTNAME} (Max Threads: {MAX_THREADS})")
-    offset = None
     
+    # Start wake up thread
+    t_wake = threading.Thread(target=wake_up_thread)
+    t_wake.daemon = True
+    t_wake.start()
+
+    offset = None
     while True:
         updates = get_updates(offset)
         if updates and updates.get("ok"):
@@ -132,49 +196,38 @@ def main():
                 user_id = str(message["from"]["id"])
                 prompt = message["text"]
 
-                print(f"Received message from user ID: {user_id}")
-
                 if ALLOWED_USER_ID and user_id != ALLOWED_USER_ID:
-                    print(f"Unauthorized access attempt from user ID: {user_id}")
                     send_message(chat_id, "Unauthorized.")
                     continue
 
                 if prompt == "/status":
                     with task_lock:
-                        running = [t for t in active_tasks if t.status == "running"]
-                        pending = [t for t in active_tasks if t.status == "pending"]
-                        
                         status_msg = f"Status on {HOSTNAME}:\n"
-                        status_msg += f"Workers: {worker_count}/{MAX_THREADS} active\n\n"
-                        
-                        if running:
-                            status_msg += "🚀 Running Tasks:\n"
-                            for t in running:
-                                status_msg += f"- {t.prompt[:30]}... (Worker {t.worker_id})\n"
-                        
-                        if pending:
-                            status_msg += "\n⏳ Queued Tasks:\n"
-                            for t in pending:
-                                status_msg += f"- {t.prompt[:30]}...\n"
-                                
-                        if not running and not pending:
-                            status_msg += "Currently idle."
-                            
+                        status_msg += f"Workers: {worker_count}/{MAX_THREADS} active\n"
+                        status_msg += f"Session ID: {user_sessions.get(user_id, 'None')}\n"
                         send_message(chat_id, status_msg)
                     continue
 
+                if prompt == "/clear":
+                    with session_lock:
+                        if user_id in user_sessions:
+                            del user_sessions[user_id]
+                            save_sessions()
+                            send_message(chat_id, "Session cleared.")
+                        else:
+                            send_message(chat_id, "No active session to clear.")
+                    continue
+
                 if prompt == "/start":
-                    send_message(chat_id, f"Gemini CLI on {HOSTNAME} ready. Max threads: {MAX_THREADS}")
+                    send_message(chat_id, f"Gemini CLI on {HOSTNAME} ready. Session persistence enabled.")
                     continue
 
                 # New Task Logic
                 with worker_lock:
                     with task_lock:
-                        # Clean up old completed tasks from the active_tasks list
                         active_tasks[:] = [t for t in active_tasks if t.status in ["pending", "running"]]
-                        
-                        if len(active_tasks) >= MAX_THREADS + 5: # Basic buffer
-                            send_message(chat_id, "System busy. Please wait for current tasks to complete.")
+                        if len(active_tasks) >= MAX_THREADS + 5:
+                            send_message(chat_id, "System busy.")
                             continue
 
                         new_task = Task(chat_id=chat_id, user_id=user_id, prompt=prompt)
@@ -186,10 +239,8 @@ def main():
                             t = threading.Thread(target=worker_thread, args=(worker_count,))
                             t.daemon = True
                             t.start()
-                        else:
-                            send_message(chat_id, f"All {MAX_THREADS} workers busy. Task queued.")
-
         time.sleep(1)
 
 if __name__ == "__main__":
     main()
+
