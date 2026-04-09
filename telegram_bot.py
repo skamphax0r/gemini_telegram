@@ -6,6 +6,7 @@ import os
 import sys
 import socket
 import threading
+import re
 from queue import Queue
 from dataclasses import dataclass
 from datetime import datetime
@@ -97,15 +98,9 @@ def call_gemini(prompt, user_id=None):
             json_str = output[start_idx:]
             data = json.loads(json_str)
             
-            # After a successful run, Gemini CLI output (if captured) might contain new session info
-            # However, since we can't easily get the new UUID from the JSON output if it's not there,
-            # we rely on the fact that if we resume a session, it stays that session.
-            # If it's a new session, we need to find its UUID.
             if not session_id:
-                # Get the latest session UUID
                 list_cmd = ["gemini", "--list-sessions"]
                 list_result = subprocess.run(list_cmd, capture_output=True, text=True)
-                # Parse the latest session UUID from output like: 1. prompt (time) [uuid]
                 lines = list_result.stdout.strip().split('\n')
                 if lines:
                     last_line = lines[-1]
@@ -151,17 +146,14 @@ def worker_thread(worker_id):
     with worker_lock:
         worker_count -= 1
 
-def wake_up_thread():
-    """Periodically sends a 'wake up' message if ALLOWED_USER_ID is set."""
-    if not ALLOWED_USER_ID:
-        return
+def schedule_reply(chat_id, delay_seconds, message_text="⏰ This is your scheduled reply!"):
+    """Sends a message after a delay."""
+    def delayed_send():
+        send_message(chat_id, message_text)
     
-    while True:
-        # Sleep for 12 hours (43200 seconds)
-        time.sleep(43200)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        msg = f"⏰ Wake up! System check at {now}. I am still running on {HOSTNAME}."
-        send_message(ALLOWED_USER_ID, msg)
+    t = threading.Timer(delay_seconds, delayed_send)
+    t.start()
+    return t
 
 def get_updates(offset=None):
     params = {"timeout": 30, "offset": offset}
@@ -177,11 +169,6 @@ def main():
     load_sessions()
     print(f"Gemini Telegram Bot running on {HOSTNAME} (Max Threads: {MAX_THREADS})")
     
-    # Start wake up thread
-    t_wake = threading.Thread(target=wake_up_thread)
-    t_wake.daemon = True
-    t_wake.start()
-
     offset = None
     while True:
         updates = get_updates(offset)
@@ -194,10 +181,26 @@ def main():
                     
                 chat_id = message["chat"]["id"]
                 user_id = str(message["from"]["id"])
-                prompt = message["text"]
+                prompt = message["text"].strip()
 
                 if ALLOWED_USER_ID and user_id != ALLOWED_USER_ID:
                     send_message(chat_id, "Unauthorized.")
+                    continue
+
+                # Check for "reply in X min" pattern
+                match = re.search(r"reply in (\d+)\s*(min|minute|minutes|hr|hour|hours|sec|second|seconds)", prompt, re.IGNORECASE)
+                if match:
+                    amount = int(match.group(1))
+                    unit = match.group(2).lower()
+                    
+                    seconds = amount
+                    if "min" in unit:
+                        seconds = amount * 60
+                    elif "hr" in unit or "hour" in unit:
+                        seconds = amount * 3600
+                    
+                    schedule_reply(chat_id, seconds, f"⏰ You asked me to reply in {amount} {unit}. Here I am!")
+                    send_message(chat_id, f"OK! I will reply to you in {amount} {unit}.")
                     continue
 
                 if prompt == "/status":
@@ -243,4 +246,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -72,5 +72,15 @@ class TestGeminiBot(unittest.TestCase):
         self.assertTrue(updates["ok"])
         mock_get.assert_called_once()
 
+    @patch("telegram_bot.send_message")
+    def test_schedule_reply(self, mock_send):
+        # We use a very short delay for testing
+        with patch("threading.Timer") as mock_timer:
+            telegram_bot.schedule_reply(123, 0.01, "test message")
+            mock_timer.assert_called_once()
+            args, kwargs = mock_timer.call_args
+            self.assertEqual(args[0], 0.01)
+            # args[1] is the function 'delayed_send'
+            
 if __name__ == "__main__":
     unittest.main()
