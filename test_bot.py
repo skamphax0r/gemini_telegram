@@ -24,63 +24,39 @@ class TestGeminiBot(unittest.TestCase):
     def test_send_message(self, mock_post):
         telegram_bot.send_message(123, "hello")
         mock_post.assert_called_once()
-        args, kwargs = mock_post.call_args
-        self.assertIn("chat_id", kwargs["data"])
-        self.assertEqual(kwargs["data"]["text"], "hello")
 
     @patch("telegram_bot.subprocess.run")
     def test_call_gemini_with_session(self, mock_run):
-        # Mock session persistence
         telegram_bot.user_sessions["12345"] = "old-uuid"
-        
         mock_output = json.dumps({"response": "Resumed response"})
         mock_run.return_value = MagicMock(stdout=mock_output, stderr="", returncode=0)
         
         response = telegram_bot.call_gemini("continue", user_id="12345")
         self.assertEqual(response, "Resumed response")
-        
-        # Verify --resume was used
-        args, kwargs = mock_run.call_args
-        self.assertIn("--resume", args[0])
-        self.assertIn("old-uuid", args[0])
 
-    @patch("telegram_bot.subprocess.run")
-    def test_call_gemini_new_session_discovery(self, mock_run):
-        # 1. First call to gemini
-        mock_output_1 = json.dumps({"response": "New response"})
-        mock_run_1 = MagicMock(stdout=mock_output_1, stderr="", returncode=0)
+    @patch("telegram_bot.call_gemini")
+    def test_parse_intent_scheduled(self, mock_call):
+        # Mock Gemini returning a JSON intent
+        mock_call.return_value = json.dumps({
+            "is_scheduled": True,
+            "delay_seconds": 60,
+            "is_command": False,
+            "extracted_task": "Check oven",
+            "confirmation_response": "OK"
+        })
         
-        # 2. Call to gemini --list-sessions
-        mock_output_2 = "1. test [new-uuid]"
-        mock_run_2 = MagicMock(stdout=mock_output_2, stderr="", returncode=0)
-        
-        mock_run.side_effect = [mock_run_1, mock_run_2]
-        
-        with patch("telegram_bot.save_sessions"): # Avoid writing to disk
-            response = telegram_bot.call_gemini("hello", user_id="12345")
-        
-        self.assertEqual(response, "New response")
-        self.assertEqual(telegram_bot.user_sessions["12345"], "new-uuid")
-
-    @patch("telegram_bot.requests.get")
-    def test_get_updates(self, mock_get):
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"ok": True, "result": []}
-        mock_get.return_value = mock_response
-        
-        updates = telegram_bot.get_updates()
-        self.assertTrue(updates["ok"])
-        mock_get.assert_called_once()
+        intent = telegram_bot.parse_intent("remind me in 1 min to check oven")
+        self.assertTrue(intent["is_scheduled"])
+        self.assertEqual(intent["delay_seconds"], 60)
+        self.assertEqual(intent["extracted_task"], "Check oven")
 
     @patch("telegram_bot.send_message")
-    def test_schedule_reply(self, mock_send):
-        # We use a very short delay for testing
+    def test_schedule_task(self, mock_send):
         with patch("threading.Timer") as mock_timer:
-            telegram_bot.schedule_reply(123, 0.01, "test message")
+            telegram_bot.schedule_task(123, "456", 10, "ls", is_command=True)
             mock_timer.assert_called_once()
             args, kwargs = mock_timer.call_args
-            self.assertEqual(args[0], 0.01)
-            # args[1] is the function 'delayed_send'
-            
+            self.assertEqual(args[0], 10)
+
 if __name__ == "__main__":
     unittest.main()

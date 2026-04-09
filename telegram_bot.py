@@ -34,6 +34,7 @@ class Task:
     start_time: datetime = None
     end_time: datetime = None
     response: str = None
+    is_command: bool = False
 
 # Global State
 task_queue = Queue()
@@ -64,6 +65,8 @@ def save_sessions():
             print(f"Error saving sessions: {e}")
 
 def send_message(chat_id, text):
+    if not text:
+        return
     # Telegram has a 4096 character limit per message
     if len(text) > 4000:
         text = text[:3997] + "..."
@@ -73,10 +76,10 @@ def send_message(chat_id, text):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def call_gemini(prompt, user_id=None):
+def call_gemini(prompt, user_id=None, is_parsing=False):
     try:
         session_id = None
-        if user_id:
+        if user_id and not is_parsing:
             with session_lock:
                 session_id = user_sessions.get(str(user_id))
 
@@ -87,7 +90,7 @@ def call_gemini(prompt, user_id=None):
             "--output-format", "json"
         ]
         
-        if session_id:
+        if session_id and not is_parsing:
             cmd.extend(["--resume", session_id])
 
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -98,13 +101,13 @@ def call_gemini(prompt, user_id=None):
             json_str = output[start_idx:]
             data = json.loads(json_str)
             
-            if not session_id:
+            if user_id and not is_parsing and not session_id:
+                # Find the new session UUID
                 list_cmd = ["gemini", "--list-sessions"]
                 list_result = subprocess.run(list_cmd, capture_output=True, text=True)
                 lines = list_result.stdout.strip().split('\n')
                 if lines:
                     last_line = lines[-1]
-                    import re
                     match = re.search(r'\[(.*?)\]', last_line)
                     if match:
                         new_uuid = match.group(1)
@@ -130,7 +133,16 @@ def worker_thread(worker_id):
                 task.start_time = datetime.now()
             
             print(f"Worker {worker_id} started task: {task.prompt}")
-            response = call_gemini(task.prompt, user_id=task.user_id)
+            
+            if task.is_command:
+                # Direct shell execution for scheduled commands
+                try:
+                    res = subprocess.run(task.prompt, shell=True, capture_output=True, text=True)
+                    response = f"Output of '{task.prompt}':\n{res.stdout}\n{res.stderr}"
+                except Exception as e:
+                    response = f"Error running command '{task.prompt}': {str(e)}"
+            else:
+                response = call_gemini(task.prompt, user_id=task.user_id)
             
             with task_lock:
                 task.status = "completed"
@@ -146,14 +158,53 @@ def worker_thread(worker_id):
     with worker_lock:
         worker_count -= 1
 
-def schedule_reply(chat_id, delay_seconds, message_text="⏰ This is your scheduled reply!"):
-    """Sends a message after a delay."""
-    def delayed_send():
-        send_message(chat_id, message_text)
-    
-    t = threading.Timer(delay_seconds, delayed_send)
+def schedule_task(chat_id, user_id, delay_seconds, prompt, is_command=False, confirmation_msg=None):
+    """Schedules a task (Gemini prompt or shell command) for later execution."""
+    if confirmation_msg:
+        send_message(chat_id, confirmation_msg)
+
+    def delayed_execution():
+        new_task = Task(chat_id=chat_id, user_id=user_id, prompt=prompt, is_command=is_command)
+        with task_lock:
+            active_tasks.append(new_task)
+            task_queue.put(new_task)
+        
+        # Ensure a worker is available
+        with worker_lock:
+            global worker_count
+            if worker_count < MAX_THREADS:
+                worker_count += 1
+                t = threading.Thread(target=worker_thread, args=(worker_count,))
+                t.daemon = True
+                t.start()
+
+    t = threading.Timer(delay_seconds, delayed_execution)
     t.start()
     return t
+
+def parse_intent(prompt):
+    """Asks Gemini to parse the user's intent for scheduling."""
+    system_prompt = """
+Analyze the user's message and determine if they want to schedule a task or run a command in the future.
+Respond ONLY with a JSON object in this format:
+{
+  "is_scheduled": boolean,
+  "delay_seconds": number (0 if not scheduled),
+  "is_command": boolean (true if they specified a shell command to run, false for a normal message),
+  "extracted_task": "the text of the command or the prompt to send to Gemini later",
+  "confirmation_response": "short message to send to the user confirming the schedule"
+}
+Example: "remind me in 10 mins to check the oven" -> {"is_scheduled": true, "delay_seconds": 600, "is_command": false, "extracted_task": "Check the oven", "confirmation_response": "I will remind you in 10 minutes."}
+Example: "in 5 mins run 'ls -la'" -> {"is_scheduled": true, "delay_seconds": 300, "is_command": true, "extracted_task": "ls -la", "confirmation_response": "I will run 'ls -la' in 5 minutes."}
+If no scheduling is found, set is_scheduled to false.
+"""
+    combined_prompt = f"{system_prompt}\nUser Message: {prompt}"
+    response = call_gemini(combined_prompt, is_parsing=True)
+    try:
+        # call_gemini returns the 'response' field from the CLI output
+        return json.loads(response)
+    except:
+        return {"is_scheduled": False}
 
 def get_updates(offset=None):
     params = {"timeout": 30, "offset": offset}
@@ -187,22 +238,6 @@ def main():
                     send_message(chat_id, "Unauthorized.")
                     continue
 
-                # Check for "reply in X min" pattern
-                match = re.search(r"reply in (\d+)\s*(min|minute|minutes|hr|hour|hours|sec|second|seconds)", prompt, re.IGNORECASE)
-                if match:
-                    amount = int(match.group(1))
-                    unit = match.group(2).lower()
-                    
-                    seconds = amount
-                    if "min" in unit:
-                        seconds = amount * 60
-                    elif "hr" in unit or "hour" in unit:
-                        seconds = amount * 3600
-                    
-                    schedule_reply(chat_id, seconds, f"⏰ You asked me to reply in {amount} {unit}. Here I am!")
-                    send_message(chat_id, f"OK! I will reply to you in {amount} {unit}.")
-                    continue
-
                 if prompt == "/status":
                     with task_lock:
                         status_msg = f"Status on {HOSTNAME}:\n"
@@ -222,10 +257,23 @@ def main():
                     continue
 
                 if prompt == "/start":
-                    send_message(chat_id, f"Gemini CLI on {HOSTNAME} ready. Session persistence enabled.")
+                    send_message(chat_id, f"Gemini CLI on {HOSTNAME} ready. Scheduling and persistence enabled.")
                     continue
 
-                # New Task Logic
+                # NEW: Parse intent for scheduling
+                intent = parse_intent(prompt)
+                if intent.get("is_scheduled"):
+                    schedule_task(
+                        chat_id, 
+                        user_id, 
+                        intent["delay_seconds"], 
+                        intent["extracted_task"], 
+                        is_command=intent.get("is_command", False),
+                        confirmation_msg=intent.get("confirmation_response")
+                    )
+                    continue
+
+                # Normal Task Logic
                 with worker_lock:
                     with task_lock:
                         active_tasks[:] = [t for t in active_tasks if t.status in ["pending", "running"]]
