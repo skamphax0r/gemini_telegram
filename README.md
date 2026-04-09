@@ -3,6 +3,8 @@
 A Telegram bot interface for the Gemini CLI, allowing you to interact with Gemini AI directly from your phone or desktop via Telegram.
 
 ## Features
+-   **Session Persistence**: Automatically tracks and resumes Gemini sessions per-user using UUIDs stored in `user_sessions.json`.
+-   **Wake-up Thread**: Periodically pings the `ALLOWED_USER_ID` every 12 hours to ensure the service is alive.
 -   Asynchronous task execution using multiple threads.
 -   Queue management and status updates (`/status`).
 -   Systemd integration for background running and persistence.
@@ -70,7 +72,8 @@ If you prefer to configure the bot manually:
 > **SECURITY WARNING**: This service has access to your computer and filesystem. It executes commands via the Gemini CLI which can modify or read any file your user has access to. **Use at your own risk.**
 
 -   Send any text prompt to the bot to trigger a Gemini query.
--   Use `/status` to see current tasks and worker usage.
+-   Use `/status` to see current tasks, worker usage, and the active Session ID.
+-   Use `/clear` to reset your Gemini session and start a new conversation.
 -   Use `/start` for a basic greeting and readiness check.
 
 ## Testing
@@ -79,6 +82,13 @@ To run the unit tests:
 ```bash
 python3 test_bot.py
 ```
+
+## Contributing
+
+Contributions are welcome! Please ensure that:
+1. All changes are documented.
+2. New features include corresponding tests.
+3. **All tests must pass** in the GitHub Actions CI before a pull request will be considered for merging.
 
 ---
 
