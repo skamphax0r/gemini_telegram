@@ -6,14 +6,15 @@ import os
 import sys
 import socket
 import threading
+import re
 from queue import Queue
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 # Configuration
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ALLOWED_USER_ID = os.getenv("ALLOWED_USER_ID")
-MAX_THREADS = int(os.getenv("MAX_THREADS", "3"))
+MAX_THREADS = int(os.getenv("MAX_THREADS", "5")) # Increased default for async handling
 SESSION_FILE = "user_sessions.json"
 
 if not TOKEN:
@@ -28,14 +29,19 @@ class Task:
     chat_id: int
     user_id: str
     prompt: str
-    status: str = "pending"  # pending, running, completed, failed
+    status: str = "pending"  # pending, parsing, running, completed, failed
     worker_id: int = None
-    start_time: datetime = None
+    start_time: datetime = field(default_factory=datetime.now)
     end_time: datetime = None
     response: str = None
+    is_command: bool = False
+    is_parsing: bool = False
+
+# Global Queues
+update_queue = Queue()
+task_queue = Queue()
 
 # Global State
-task_queue = Queue()
 active_tasks = []
 task_lock = threading.Lock()
 worker_count = 0
@@ -63,7 +69,8 @@ def save_sessions():
             print(f"Error saving sessions: {e}")
 
 def send_message(chat_id, text):
-    # Telegram has a 4096 character limit per message
+    if not text:
+        return
     if len(text) > 4000:
         text = text[:3997] + "..."
     data = {"chat_id": chat_id, "text": text}
@@ -72,10 +79,10 @@ def send_message(chat_id, text):
     except Exception as e:
         print(f"Error sending message: {e}")
 
-def call_gemini(prompt, user_id=None):
+def call_gemini(prompt, user_id=None, is_parsing=False):
     try:
         session_id = None
-        if user_id:
+        if user_id and not is_parsing:
             with session_lock:
                 session_id = user_sessions.get(str(user_id))
 
@@ -86,7 +93,7 @@ def call_gemini(prompt, user_id=None):
             "--output-format", "json"
         ]
         
-        if session_id:
+        if session_id and not is_parsing:
             cmd.extend(["--resume", session_id])
 
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -97,19 +104,12 @@ def call_gemini(prompt, user_id=None):
             json_str = output[start_idx:]
             data = json.loads(json_str)
             
-            # After a successful run, Gemini CLI output (if captured) might contain new session info
-            # However, since we can't easily get the new UUID from the JSON output if it's not there,
-            # we rely on the fact that if we resume a session, it stays that session.
-            # If it's a new session, we need to find its UUID.
-            if not session_id:
-                # Get the latest session UUID
+            if user_id and not is_parsing and not session_id:
                 list_cmd = ["gemini", "--list-sessions"]
                 list_result = subprocess.run(list_cmd, capture_output=True, text=True)
-                # Parse the latest session UUID from output like: 1. prompt (time) [uuid]
                 lines = list_result.stdout.strip().split('\n')
                 if lines:
                     last_line = lines[-1]
-                    import re
                     match = re.search(r'\[(.*?)\]', last_line)
                     if match:
                         new_uuid = match.group(1)
@@ -123,19 +123,45 @@ def call_gemini(prompt, user_id=None):
     except Exception as e:
         return f"Exception while calling Gemini: {str(e)}"
 
+def parse_intent(prompt):
+    system_prompt = """
+Analyze the user's message and determine if they want to schedule a task or run a command in the future.
+Respond ONLY with a JSON object in this format:
+{
+  "is_scheduled": boolean,
+  "delay_seconds": number,
+  "is_command": boolean,
+  "extracted_task": "string",
+  "confirmation_response": "string"
+}
+"""
+    combined_prompt = f"{system_prompt}\nUser Message: {prompt}"
+    response = call_gemini(combined_prompt, is_parsing=True)
+    try:
+        return json.loads(response)
+    except:
+        return {"is_scheduled": False}
+
 def worker_thread(worker_id):
     global worker_count
     while True:
         try:
-            task = task_queue.get(timeout=5)
-            
+            task = task_queue.get(timeout=10)
             with task_lock:
                 task.status = "running"
                 task.worker_id = worker_id
                 task.start_time = datetime.now()
             
-            print(f"Worker {worker_id} started task: {task.prompt}")
-            response = call_gemini(task.prompt, user_id=task.user_id)
+            print(f"Worker {worker_id} executing task: {task.prompt[:30]}...")
+            
+            if task.is_command:
+                try:
+                    res = subprocess.run(task.prompt, shell=True, capture_output=True, text=True)
+                    response = f"Output of '{task.prompt}':\n{res.stdout}\n{res.stderr}"
+                except Exception as e:
+                    response = f"Error running command: {str(e)}"
+            else:
+                response = call_gemini(task.prompt, user_id=task.user_id)
             
             with task_lock:
                 task.status = "completed"
@@ -144,24 +170,90 @@ def worker_thread(worker_id):
             
             send_message(task.chat_id, response)
             task_queue.task_done()
-            
         except:
             break
-
     with worker_lock:
         worker_count -= 1
 
-def wake_up_thread():
-    """Periodically sends a 'wake up' message if ALLOWED_USER_ID is set."""
-    if not ALLOWED_USER_ID:
-        return
+def schedule_task(chat_id, user_id, delay_seconds, prompt, is_command=False, confirmation_msg=None):
+    if confirmation_msg:
+        send_message(chat_id, confirmation_msg)
     
+    def delayed_execution():
+        new_task = Task(chat_id=chat_id, user_id=user_id, prompt=prompt, is_command=is_command)
+        task_queue.put(new_task)
+        ensure_workers()
+
+    threading.Timer(delay_seconds, delayed_execution).start()
+
+def ensure_workers():
+    global worker_count
+    with worker_lock:
+        if worker_count < MAX_THREADS:
+            worker_count += 1
+            t = threading.Thread(target=worker_thread, args=(worker_count,))
+            t.daemon = True
+            t.start()
+
+def update_processor():
+    """Background thread to process incoming Telegram messages without blocking the main loop."""
     while True:
-        # Sleep for 12 hours (43200 seconds)
-        time.sleep(43200)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        msg = f"⏰ Wake up! System check at {now}. I am still running on {HOSTNAME}."
-        send_message(ALLOWED_USER_ID, msg)
+        update = update_queue.get()
+        message = update.get("message")
+        if not message or "text" not in message:
+            update_queue.task_done()
+            continue
+            
+        chat_id = message["chat"]["id"]
+        user_id = str(message["from"]["id"])
+        prompt = message["text"].strip()
+
+        if ALLOWED_USER_ID and user_id != ALLOWED_USER_ID:
+            send_message(chat_id, "Unauthorized.")
+            update_queue.task_done()
+            continue
+
+        if prompt == "/status":
+            with task_lock:
+                status_msg = f"Status on {HOSTNAME}:\n"
+                status_msg += f"Workers: {worker_count}/{MAX_THREADS} active\n"
+                status_msg += f"Session: {user_sessions.get(user_id, 'None')}\n"
+                send_message(chat_id, status_msg)
+            update_queue.task_done()
+            continue
+
+        if prompt == "/clear":
+            with session_lock:
+                if user_id in user_sessions:
+                    del user_sessions[user_id]
+                    save_sessions()
+                    send_message(chat_id, "Session cleared.")
+                else:
+                    send_message(chat_id, "No active session.")
+            update_queue.task_done()
+            continue
+
+        if prompt == "/start":
+            send_message(chat_id, f"Gemini CLI on {HOSTNAME} ready.")
+            update_queue.task_done()
+            continue
+
+        # Intent parsing (Gemini call) happens here in the background thread
+        intent = parse_intent(prompt)
+        if intent.get("is_scheduled"):
+            schedule_task(
+                chat_id, user_id, 
+                intent["delay_seconds"], 
+                intent["extracted_task"], 
+                is_command=intent.get("is_command", False),
+                confirmation_msg=intent.get("confirmation_response")
+            )
+        else:
+            new_task = Task(chat_id=chat_id, user_id=user_id, prompt=prompt)
+            task_queue.put(new_task)
+            ensure_workers()
+        
+        update_queue.task_done()
 
 def get_updates(offset=None):
     params = {"timeout": 30, "offset": offset}
@@ -173,14 +265,13 @@ def get_updates(offset=None):
         return None
 
 def main():
-    global worker_count
     load_sessions()
     print(f"Gemini Telegram Bot running on {HOSTNAME} (Max Threads: {MAX_THREADS})")
     
-    # Start wake up thread
-    t_wake = threading.Thread(target=wake_up_thread)
-    t_wake.daemon = True
-    t_wake.start()
+    # Start update processor
+    t_proc = threading.Thread(target=update_processor)
+    t_proc.daemon = True
+    t_proc.start()
 
     offset = None
     while True:
@@ -188,59 +279,8 @@ def main():
         if updates and updates.get("ok"):
             for update in updates.get("result", []):
                 offset = update["update_id"] + 1
-                message = update.get("message")
-                if not message or "text" not in message:
-                    continue
-                    
-                chat_id = message["chat"]["id"]
-                user_id = str(message["from"]["id"])
-                prompt = message["text"]
-
-                if ALLOWED_USER_ID and user_id != ALLOWED_USER_ID:
-                    send_message(chat_id, "Unauthorized.")
-                    continue
-
-                if prompt == "/status":
-                    with task_lock:
-                        status_msg = f"Status on {HOSTNAME}:\n"
-                        status_msg += f"Workers: {worker_count}/{MAX_THREADS} active\n"
-                        status_msg += f"Session ID: {user_sessions.get(user_id, 'None')}\n"
-                        send_message(chat_id, status_msg)
-                    continue
-
-                if prompt == "/clear":
-                    with session_lock:
-                        if user_id in user_sessions:
-                            del user_sessions[user_id]
-                            save_sessions()
-                            send_message(chat_id, "Session cleared.")
-                        else:
-                            send_message(chat_id, "No active session to clear.")
-                    continue
-
-                if prompt == "/start":
-                    send_message(chat_id, f"Gemini CLI on {HOSTNAME} ready. Session persistence enabled.")
-                    continue
-
-                # New Task Logic
-                with worker_lock:
-                    with task_lock:
-                        active_tasks[:] = [t for t in active_tasks if t.status in ["pending", "running"]]
-                        if len(active_tasks) >= MAX_THREADS + 5:
-                            send_message(chat_id, "System busy.")
-                            continue
-
-                        new_task = Task(chat_id=chat_id, user_id=user_id, prompt=prompt)
-                        active_tasks.append(new_task)
-                        task_queue.put(new_task)
-
-                        if worker_count < MAX_THREADS:
-                            worker_count += 1
-                            t = threading.Thread(target=worker_thread, args=(worker_count,))
-                            t.daemon = True
-                            t.start()
+                update_queue.put(update) # Main loop is now truly non-blocking
         time.sleep(1)
 
 if __name__ == "__main__":
     main()
-

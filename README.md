@@ -4,7 +4,9 @@ A Telegram bot interface for the Gemini CLI, allowing you to interact with Gemin
 
 ## Features
 -   **Session Persistence**: Automatically tracks and resumes Gemini sessions per-user using UUIDs stored in `user_sessions.json`.
--   **Wake-up Thread**: Periodically pings the `ALLOWED_USER_ID` every 12 hours to ensure the service is alive.
+-   **Gemini-Powered Scheduling**: Use natural language to schedule tasks. Gemini analyzes your intent to either send a message or execute a shell command in the future.
+    -   Example: "Remind me in 10 mins to check the oven"
+    -   Example: "In 5 mins, run 'ls -la' and show me the output"
 -   Asynchronous task execution using multiple threads.
 -   Queue management and status updates (`/status`).
 -   Systemd integration for background running and persistence.
@@ -72,6 +74,7 @@ If you prefer to configure the bot manually:
 > **SECURITY WARNING**: This service has access to your computer and filesystem. It executes commands via the Gemini CLI which can modify or read any file your user has access to. **Use at your own risk.**
 
 -   Send any text prompt to the bot to trigger a Gemini query.
+-   **Scheduling**: Send natural language commands like "remind me in 5 mins to take a break" or "in 2 mins run 'uptime'".
 -   Use `/status` to see current tasks, worker usage, and the active Session ID.
 -   Use `/clear` to reset your Gemini session and start a new conversation.
 -   Use `/start` for a basic greeting and readiness check.
