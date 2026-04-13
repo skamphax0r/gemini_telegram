@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from .database import Database
 from .channels.base import BaseChannel
 from .runner import ContainerRunner
@@ -18,7 +18,7 @@ class Orchestrator:
     def handle_message(self, chat_id: str, sender: str, raw_msg: dict):
         # Security check
         if self.allowed_user_id and sender != self.allowed_user_id:
-            # For unauthorized messages, we ignore unless it's an explicit /activate command (coming in next commits)
+            # For unauthorized messages, we ignore
             return
 
         content = raw_msg.get("text", "").strip()
@@ -46,43 +46,66 @@ class Orchestrator:
             self.send_response(chat_id, "Session cleared.")
         elif content.startswith("/memory"):
             self.handle_memory_command(chat_id, content)
+        elif content.startswith("/schedule"):
+            self.handle_schedule_command(chat_id, content)
         else:
-            # Set typing indicator
-            channel = self.find_channel_for_chat(chat_id)
-            if channel:
-                channel.set_typing(chat_id, True)
+            self.execute_prompt(chat_id, content)
 
-            # Invoke Gemini Agent in container
-            session_id = self.db.get_session(chat_id)
-            env_vars = {
-                "GEMINI_SESSION_ID": session_id if session_id else ""
-            }
+    def handle_schedule_command(self, chat_id: str, content: str):
+        """Handle /schedule <minutes> <prompt>"""
+        parts = content.split(" ", 2)
+        if len(parts) < 3:
+            self.send_response(chat_id, "Usage: /schedule <minutes> <prompt>")
+            return
+        
+        try:
+            minutes = int(parts[1])
+            prompt = parts[2]
+            run_at = (datetime.now() + timedelta(minutes=minutes)).isoformat()
             
-            result = self.runner.run_agent(chat_id, content, env_vars)
-            
-            if result.get("status") == "success":
-                response_text = result.get("response", "No response.")
-                self.send_response(chat_id, response_text)
-                
-                # Store bot response in DB
-                self.db.store_message(
-                    chat_jid=chat_id,
-                    sender="bot",
-                    content=response_text,
-                    timestamp=datetime.now().isoformat(),
-                    is_from_me=True,
-                    is_bot_message=True
-                )
-                
-                # Update session ID if one was returned
-                new_session_id = result.get("session_id")
-                if new_session_id:
-                    self.db.set_session(chat_id, new_session_id)
-            else:
-                self.send_response(chat_id, f"Error: {result.get('error', 'Unknown agent error')}")
+            self.db.add_task(chat_id, prompt, "once", run_at)
+            self.send_response(chat_id, f"Task scheduled to run in {minutes} minutes.")
+        except ValueError:
+            self.send_response(chat_id, "Invalid number of minutes.")
 
-            if channel:
-                channel.set_typing(chat_id, False)
+    def execute_prompt(self, chat_id: str, prompt: str):
+        """Invoke Gemini Agent in container and handle response."""
+        # Set typing indicator
+        channel = self.find_channel_for_chat(chat_id)
+        if channel:
+            channel.set_typing(chat_id, True)
+
+        # Get session ID for context persistence
+        session_id = self.db.get_session(chat_id)
+        env_vars = {
+            "GEMINI_SESSION_ID": session_id if session_id else ""
+        }
+        
+        result = self.runner.run_agent(chat_id, prompt, env_vars)
+        
+        if result.get("status") == "success":
+            response_text = result.get("response", "No response.")
+            self.send_response(chat_id, response_text)
+            
+            # Store bot response in DB
+            self.db.store_message(
+                chat_jid=chat_id,
+                sender="bot",
+                content=response_text,
+                timestamp=datetime.now().isoformat(),
+                is_from_me=True,
+                is_bot_message=True
+            )
+            
+            # Update session ID if one was returned
+            new_session_id = result.get("session_id")
+            if new_session_id:
+                self.db.set_session(chat_id, new_session_id)
+        else:
+            self.send_response(chat_id, f"Error: {result.get('error', 'Unknown agent error')}")
+
+        if channel:
+            channel.set_typing(chat_id, False)
 
     def handle_memory_command(self, chat_id: str, content: str):
         workspace_path = self.runner._get_workspace_path(chat_id)
