@@ -47,6 +47,9 @@ class ContainerRunner:
         # This allows us to update the agent code on the host and have it reflected in the container
         agent_src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "agent"))
         
+        # Mount host Gemini config for OAuth session persistence
+        gemini_config_path = os.path.expanduser("~/.gemini")
+        
         container_name = f"gemini-run-{int(datetime.now().timestamp())}"
         
         cmd = [
@@ -54,6 +57,7 @@ class ContainerRunner:
             "--name", container_name,
             "-v", f"{workspace_path}:/workspace:Z",
             "-v", f"{agent_src_path}:/app:ro,Z",
+            "-v", f"{gemini_config_path}:/root/.gemini:Z",
             "-w", "/workspace"
         ]
         
@@ -97,5 +101,5 @@ class ContainerRunner:
 
     def build_image(self):
         agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "agent"))
-        cmd = ["sudo", self.runtime, "build", "-t", self.image_name, agent_dir]
+        cmd = ["sudo", self.runtime, "build", "--no-cache", "-t", self.image_name, agent_dir]
         subprocess.run(cmd, check=True)

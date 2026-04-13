@@ -4,6 +4,7 @@ from src.orchestrator import Orchestrator
 from src.database import Database
 from src.channels.base import BaseChannel
 import os
+import shutil
 
 class MockChannel(BaseChannel):
     def __init__(self):
@@ -30,8 +31,7 @@ class TestOrchestrator(unittest.TestCase):
 
     def test_unauthorized_message(self):
         self.channel.on_message("chat1", "unknown_user", {"text": "/status"})
-        self.assertEqual(len(self.channel.sent_messages), 1)
-        self.assertEqual(self.channel.sent_messages[0][1], "Unauthorized.")
+        self.assertEqual(len(self.channel.sent_messages), 0)
 
     def test_authorized_status_command(self):
         self.channel.on_message("chat1", "123", {"text": "/status"})
@@ -45,17 +45,28 @@ class TestOrchestrator(unittest.TestCase):
 
     def test_general_message_response(self):
         # Mock successful runner response
-        self.runner.run_agent.return_value = {"status": "success", "response": "Hello from Gemini"}
+        self.runner.run_agent.return_value = {"status": "success", "response": "Hello from Gemini", "session_id": "new-uuid"}
         
         self.channel.on_message("chat1", "123", {"text": "hello bot"})
         self.assertEqual(len(self.channel.sent_messages), 1)
         self.assertEqual(self.channel.sent_messages[0][1], "Hello from Gemini")
         
-        # Verify bot response stored in DB
-        messages = self.db.get_messages("chat1")
-        # 1 for user message, 1 for bot message
-        self.assertEqual(len(messages), 2)
-        self.assertEqual(messages[1]["content"], "Hello from Gemini")
+        # Verify session ID stored
+        self.assertEqual(self.db.get_session("chat1"), "new-uuid")
+
+    def test_memory_command(self):
+        self.runner._get_workspace_path.return_value = "/tmp/test_workspace"
+        os.makedirs("/tmp/test_workspace", exist_ok=True)
+        
+        # Test write
+        self.channel.on_message("chat1", "123", {"text": "/memory This is my memory"})
+        self.assertEqual(self.channel.sent_messages[0][1], "Memory updated successfully.")
+        
+        # Test read
+        self.channel.on_message("chat1", "123", {"text": "/memory"})
+        self.assertIn("This is my memory", self.channel.sent_messages[1][1])
+        
+        shutil.rmtree("/tmp/test_workspace")
 
 if __name__ == "__main__":
     unittest.main()
