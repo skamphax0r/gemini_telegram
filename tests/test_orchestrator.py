@@ -21,7 +21,8 @@ class TestOrchestrator(unittest.TestCase):
         self.db_path = "test_orch.db"
         self.db = Database(self.db_path)
         self.channel = MockChannel()
-        self.orchestrator = Orchestrator(self.db, [self.channel], allowed_user_id="123")
+        self.runner = MagicMock()
+        self.orchestrator = Orchestrator(self.db, [self.channel], self.runner, allowed_user_id="123")
 
     def tearDown(self):
         if os.path.exists(self.db_path):
@@ -43,9 +44,18 @@ class TestOrchestrator(unittest.TestCase):
         self.assertEqual(messages[0]["content"], "/status")
 
     def test_general_message_response(self):
+        # Mock successful runner response
+        self.runner.run_agent.return_value = {"status": "success", "response": "Hello from Gemini"}
+        
         self.channel.on_message("chat1", "123", {"text": "hello bot"})
         self.assertEqual(len(self.channel.sent_messages), 1)
-        self.assertTrue("Received: hello bot" in self.channel.sent_messages[0][1])
+        self.assertEqual(self.channel.sent_messages[0][1], "Hello from Gemini")
+        
+        # Verify bot response stored in DB
+        messages = self.db.get_messages("chat1")
+        # 1 for user message, 1 for bot message
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[1]["content"], "Hello from Gemini")
 
 if __name__ == "__main__":
     unittest.main()

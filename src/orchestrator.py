@@ -1,12 +1,15 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from .database import Database
 from .channels.base import BaseChannel
+from .runner import ContainerRunner
+import os
 
 class Orchestrator:
-    def __init__(self, db: Database, channels: List[BaseChannel], allowed_user_id: Optional[str] = None):
+    def __init__(self, db: Database, channels: List[BaseChannel], runner: ContainerRunner, allowed_user_id: Optional[str] = None):
         self.db = db
         self.channels = channels
+        self.runner = runner
         self.allowed_user_id = allowed_user_id
         
         for channel in self.channels:
@@ -43,8 +46,36 @@ class Orchestrator:
             # Logic for clearing session will be added when session manager is built
             self.send_response(chat_id, "Session clearing not yet implemented in orchestrator.")
         else:
-            # Placeholder for Gemini call
-            self.send_response(chat_id, f"Received: {content}. (Gemini integration coming in next commits)")
+            # Set typing indicator
+            channel = self.find_channel_for_chat(chat_id)
+            if channel:
+                channel.set_typing(chat_id, True)
+
+            # Invoke Gemini Agent in container
+            env_vars = {
+                "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY", "dummy_key")
+            }
+            
+            result = self.runner.run_agent(chat_id, content, env_vars)
+            
+            if result.get("status") == "success":
+                response_text = result.get("response", "No response.")
+                self.send_response(chat_id, response_text)
+                
+                # Store bot response in DB
+                self.db.store_message(
+                    chat_jid=chat_id,
+                    sender="bot",
+                    content=response_text,
+                    timestamp=datetime.now().isoformat(),
+                    is_from_me=True,
+                    is_bot_message=True
+                )
+            else:
+                self.send_response(chat_id, f"Error: {result.get('error', 'Unknown agent error')}")
+
+            if channel:
+                channel.set_typing(chat_id, False)
 
     def send_response(self, chat_id: str, text: str):
         # Find the correct channel (for now, just use the first one if only one exists)
