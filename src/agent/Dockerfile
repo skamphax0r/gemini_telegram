@@ -16,4 +16,4 @@ RUN pip install --no-cache-dir \
     python-dotenv
 
 # Entrypoint script will be mounted/provided later
-CMD ["python", "/app/agent_entrypoint.py"]
+CMD ["python", "/app/agent.py"]
