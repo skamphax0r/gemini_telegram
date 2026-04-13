@@ -18,9 +18,7 @@ class Orchestrator:
     def handle_message(self, chat_id: str, sender: str, raw_msg: dict):
         # Security check
         if self.allowed_user_id and sender != self.allowed_user_id:
-            for channel in self.channels:
-                if isinstance(channel, type(self.find_channel_for_chat(chat_id))):
-                    channel.send_message(chat_id, "Unauthorized.")
+            # For unauthorized messages, we ignore unless it's an explicit /activate command (coming in next commits)
             return
 
         content = raw_msg.get("text", "").strip()
@@ -37,14 +35,17 @@ class Orchestrator:
             metadata=raw_msg
         )
 
-        # Initial logic: respond to basic commands
+        # Basic commands
         if content == "/status":
             self.send_response(chat_id, "System ready.")
         elif content == "/start":
             self.send_response(chat_id, "Gemini Orchestrator initialized.")
         elif content == "/clear":
-            # Logic for clearing session will be added when session manager is built
-            self.send_response(chat_id, "Session clearing not yet implemented in orchestrator.")
+            with self.db._get_connection() as conn:
+                conn.execute("DELETE FROM sessions WHERE chat_jid = ?", (chat_id,))
+            self.send_response(chat_id, "Session cleared.")
+        elif content.startswith("/memory"):
+            self.handle_memory_command(chat_id, content)
         else:
             # Set typing indicator
             channel = self.find_channel_for_chat(chat_id)
@@ -52,8 +53,9 @@ class Orchestrator:
                 channel.set_typing(chat_id, True)
 
             # Invoke Gemini Agent in container
+            session_id = self.db.get_session(chat_id)
             env_vars = {
-                "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY", "dummy_key")
+                "GEMINI_SESSION_ID": session_id if session_id else ""
             }
             
             result = self.runner.run_agent(chat_id, content, env_vars)
@@ -71,19 +73,43 @@ class Orchestrator:
                     is_from_me=True,
                     is_bot_message=True
                 )
+                
+                # Update session ID if one was returned
+                new_session_id = result.get("session_id")
+                if new_session_id:
+                    self.db.set_session(chat_id, new_session_id)
             else:
                 self.send_response(chat_id, f"Error: {result.get('error', 'Unknown agent error')}")
 
             if channel:
                 channel.set_typing(chat_id, False)
 
+    def handle_memory_command(self, chat_id: str, content: str):
+        workspace_path = self.runner._get_workspace_path(chat_id)
+        gemini_md_path = os.path.join(workspace_path, "GEMINI.md")
+        
+        parts = content.split(" ", 1)
+        if len(parts) == 1:
+            # Read memory
+            if os.path.exists(gemini_md_path):
+                with open(gemini_md_path, "r") as f:
+                    memory = f.read()
+                    self.send_response(chat_id, f"Current Memory (GEMINI.md):\n\n{memory}")
+            else:
+                self.send_response(chat_id, "No memory file found.")
+        else:
+            # Write/Update memory
+            new_content = parts[1]
+            with open(gemini_md_path, "w") as f:
+                f.write(new_content)
+            self.send_response(chat_id, "Memory updated successfully.")
+
     def send_response(self, chat_id: str, text: str):
-        # Find the correct channel (for now, just use the first one if only one exists)
-        if self.channels:
-            self.channels[0].send_message(chat_id, text)
+        channel = self.find_channel_for_chat(chat_id)
+        if channel:
+            channel.send_message(chat_id, text)
 
     def find_channel_for_chat(self, chat_id: str) -> Optional[BaseChannel]:
-        # Simple implementation for now
         return self.channels[0] if self.channels else None
 
     def start(self):
