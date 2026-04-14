@@ -1,9 +1,11 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+import os
+import sys
+import subprocess
 from .database import Database
 from .channels.base import BaseChannel
 from .runner import ContainerRunner
-import os
 
 class Orchestrator:
     def __init__(self, db: Database, channels: List[BaseChannel], runner: ContainerRunner, allowed_user_id: Optional[str] = None):
@@ -11,6 +13,7 @@ class Orchestrator:
         self.channels = channels
         self.runner = runner
         self.allowed_user_id = allowed_user_id
+        self.start_time = datetime.now()
         
         for channel in self.channels:
             channel.set_on_message(self.handle_message)
@@ -37,7 +40,7 @@ class Orchestrator:
 
         # Basic commands
         if content == "/status":
-            self.send_response(chat_id, "System ready.")
+            self.handle_status_command(chat_id)
         elif content == "/start":
             self.send_response(chat_id, "Gemini Orchestrator initialized.")
         elif content == "/clear":
@@ -50,6 +53,34 @@ class Orchestrator:
             self.handle_schedule_command(chat_id, content)
         else:
             self.execute_prompt(chat_id, content)
+
+    def handle_status_command(self, chat_id: str):
+        uptime = datetime.now() - self.start_time
+        # Format uptime string
+        days = uptime.days
+        hours, remainder = divmod(uptime.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+
+        python_ver = sys.version.split()[0]
+        
+        # Get Gemini version from host
+        try:
+            gemini_ver = subprocess.check_output(["gemini", "--version"], text=True).strip()
+        except:
+            gemini_ver = "Unknown"
+
+        status_msg = (
+            "🤖 *Gemini Bot Status*\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"✅ **System**: Ready\n"
+            f"🕒 **Uptime**: `{uptime_str}`\n"
+            f"🐍 **Python**: `{python_ver}`\n"
+            f"💎 **Gemini CLI**: `{gemini_ver}`\n"
+            f"📦 **Runtime**: `{self.runner.runtime}`\n"
+            f"👤 **User ID**: `{self.allowed_user_id or 'Any'}`"
+        )
+        self.send_response(chat_id, status_msg)
 
     def handle_schedule_command(self, chat_id: str, content: str):
         """Handle /schedule <minutes> <prompt>"""
