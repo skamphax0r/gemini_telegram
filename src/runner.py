@@ -39,7 +39,7 @@ class ContainerRunner:
                   chat_jid: str, 
                   prompt: str, 
                   env_vars: Dict[str, str], 
-                  timeout: int = 120) -> Dict[str, Any]:
+                  timeout: int = 300) -> Dict[Any, Any]:
         workspace_path = self._get_workspace_path(chat_jid)
         self._ensure_gemini_md(workspace_path)
         
