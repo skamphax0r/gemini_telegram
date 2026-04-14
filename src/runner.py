@@ -9,10 +9,10 @@ class ContainerRunner:
     def __init__(self, 
                  image_name: str = "gemini-agent:latest", 
                  runtime: str = "docker",
-                 base_workspace_dir: str = "/home/anelson/gitwork/gemini/workspaces"):
+                 base_workspace_dir: Optional[str] = None):
         self.image_name = image_name
         self.runtime = self._detect_runtime() if runtime == "auto" else runtime
-        self.base_workspace_dir = base_workspace_dir
+        self.base_workspace_dir = base_workspace_dir or os.path.join(os.getcwd(), "workspaces")
         os.makedirs(self.base_workspace_dir, exist_ok=True)
 
     def _detect_runtime(self) -> str:
@@ -57,9 +57,12 @@ class ContainerRunner:
             "--name", container_name,
             "-v", f"{workspace_path}:/workspace:Z",
             "-v", f"{agent_src_path}:/app:ro,Z",
-            "-v", f"{gemini_config_path}:/root/.gemini:Z",
             "-w", "/workspace"
         ]
+
+        if os.path.exists(gemini_config_path):
+            cmd.insert(cmd.index("-w"), "-v")
+            cmd.insert(cmd.index("-w"), f"{gemini_config_path}:/root/.gemini:Z")
         
         # Add environment variables
         for key, val in env_vars.items():

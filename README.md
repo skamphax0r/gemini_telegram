@@ -1,98 +1,65 @@
-# Gemini Telegram Bot
+# Gemini Telegram Bot (NanoClaw-Style)
 
-A Telegram bot interface for the Gemini CLI, allowing you to interact with Gemini AI directly from your phone or desktop via Telegram.
+A high-performance, secure, and persistent Telegram bot interface for Gemini AI, inspired by the NanoClaw architecture.
 
-## Features
--   **Session Persistence**: Automatically tracks and resumes Gemini sessions per-user using UUIDs stored in `user_sessions.json`.
--   **Gemini-Powered Scheduling**: Use natural language to schedule tasks. Gemini analyzes your intent to either send a message or execute a shell command in the future.
-    -   Example: "Remind me in 10 mins to check the oven"
-    -   Example: "In 5 mins, run 'ls -la' and show me the output"
--   Asynchronous task execution using multiple threads.
--   Queue management and status updates (`/status`).
--   Systemd integration for background running and persistence.
--   Secure configuration via `.env` file.
+## Key Features
 
-## Prerequisites
--   Python 3.x
--   `requests` library (`pip install requests`)
--   Gemini CLI installed and configured.
+- **Container Isolation**: All Gemini processing and tool execution (shell commands, web searches) run in isolated Docker/Podman containers.
+- **Persistent Workspace Memory**: Each chat has its own dedicated directory and `GEMINI.md` file, providing long-term memory across sessions.
+- **SQLite Database Backend**: Message history, session mappings, and scheduled tasks are stored in a robust SQLite database.
+- **Natural Language Task Scheduler**: Use `/schedule <minutes> <prompt>` to have Gemini perform tasks in the future.
+- **Integrated Web Access**: Gemini can autonomously search the web (via DuckDuckGo) and fetch text content from URLs.
+- **OAuth Subscription Support**: Leverages your existing authenticated Gemini CLI session to use your Gemini Pro subscription.
 
-## Setting up your Telegram Bot
+## Architecture
 
-1.  Open Telegram and search for **@BotFather**.
-2.  Send the message `/newbot` to start the creation process.
-3.  Follow the prompts to give your bot a name and a unique username (ending in `bot`).
-4.  Once created, @BotFather will provide an **API Token**. Copy this token; you will need it for the installation.
-5.  **Important**: Click the link to your bot provided by @BotFather (e.g., `t.me/your_bot_name`) and click **Start** or send a message. This is required for the installer to detect your User ID.
+```text
+[Telegram] <-> [TelegramChannel] <-> [Orchestrator] <-> [SQLite DB]
+                                          |
+                                          v
+                                  [ContainerRunner]
+                                          |
+                                          v
+                                  [Gemini Agent (Isolated)]
+                                  (Mounted ~/.gemini & Workspace)
+```
 
 ## Installation
 
-The easiest way to set up the bot is by using the provided installation script. This script will:
-1.  Verify dependencies.
-2.  Prompt for your Telegram bot token.
-3.  Help you retrieve your user ID to restrict access.
-4.  Create a `.env` file for configuration.
-5.  Set up a systemd user service.
-
-```bash
-chmod +x install.sh
-./install.sh
-```
-
-## Manual Configuration
-
-If you prefer to configure the bot manually:
-
-1.  **Environment Variables**: Create a `.env` file in the project directory:
-    -   `TELEGRAM_BOT_TOKEN`: Your bot token from @BotFather.
-    -   `ALLOWED_USER_ID`: Your Telegram ID (numeric) to restrict access.
-    -   `MAX_THREADS`: Number of concurrent Gemini instances (default: 3).
-
-2.  **Systemd Service**: 
-    -   The service is normally managed by the installer. If you wish to set it up manually, create a file at `~/.config/systemd/user/gemini-telegram-bot.service` with the following content (replacing paths as needed):
-
-    ```ini
-    [Unit]
-    Description=Gemini CLI Telegram Bot
-    After=network.target
-
-    [Service]
-    ExecStart=/usr/bin/python3 /path/to/bot/telegram_bot.py
-    WorkingDirectory=/path/to/bot/
-    Restart=always
-    EnvironmentFile=/path/to/bot/.env
-
-    [Install]
-    WantedBy=default.target
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/skamphax0r/gemini_telegram.git
+    cd gemini_telegram
     ```
-    -   Run `systemctl --user daemon-reload`.
-    -   Enable and start: `systemctl --user enable --now gemini-telegram-bot.service`.
 
-## Usage
+2.  **Configure Environment**:
+    Create a `.env` file from the example:
+    ```bash
+    cp .env.example .env
+    ```
+    Edit `.env` and set:
+    - `TELEGRAM_BOT_TOKEN`: Your bot token from @BotFather.
+    - `ALLOWED_USER_ID`: Your Telegram User ID (to restrict access).
 
-> [!WARNING]
-> **SECURITY WARNING**: This service has access to your computer and filesystem. It executes commands via the Gemini CLI which can modify or read any file your user has access to. **Use at your own risk.**
+3.  **Run Installer**:
+    ```bash
+    chmod +x install.sh
+    ./install.sh
+    ```
 
--   Send any text prompt to the bot to trigger a Gemini query.
--   **Scheduling**: Send natural language commands like "remind me in 5 mins to take a break" or "in 2 mins run 'uptime'".
--   Use `/status` to see current tasks, worker usage, and the active Session ID.
--   Use `/clear` to reset your Gemini session and start a new conversation.
--   Use `/start` for a basic greeting and readiness check.
+4.  **Start the Service**:
+    ```bash
+    sudo systemctl start gemini-telegram-bot.service
+    ```
 
-## Testing
+## Bot Commands
 
-To run the unit tests:
-```bash
-python3 test_bot.py
-```
-
-## Contributing
-
-Contributions are welcome! Please ensure that:
-1. All changes are documented.
-2. New features include corresponding tests.
-3. **All tests must pass** in the GitHub Actions CI before a pull request will be considered for merging.
+- `/status`: Check system health.
+- `/start`: Initialize the orchestrator.
+- `/clear`: Reset the current Gemini session context.
+- `/memory`: Read the current `GEMINI.md` memory file.
+- `/memory <text>`: Manually update the memory file.
+- `/schedule <minutes> <prompt>`: Schedule a task for the future.
 
 ---
-
-*Partially generated by Gemini AI.*
+*Built with Gemini CLI.*
