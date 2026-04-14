@@ -36,7 +36,9 @@ class TestOrchestrator(unittest.TestCase):
     def test_authorized_status_command(self):
         self.channel.on_message("chat1", "123", {"text": "/status"})
         self.assertEqual(len(self.channel.sent_messages), 1)
-        self.assertEqual(self.channel.sent_messages[0][1], "System ready.")
+        self.assertIn("Gemini Bot Status", self.channel.sent_messages[0][1])
+        self.assertIn("Python", self.channel.sent_messages[0][1])
+        self.assertIn("Uptime", self.channel.sent_messages[0][1])
         
         # Verify message was stored in DB
         messages = self.db.get_messages("chat1")
