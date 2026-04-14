@@ -28,9 +28,24 @@ class GeminiAgent:
 
     def process_message(self, message: str) -> Dict[str, Any]:
         """Call the gemini CLI to process a message."""
+        # Define system instructions for tools
+        system_instructions = (
+            "You are a helpful AI assistant. You have access to the following tools via shell commands:\n"
+            "1. Web Search: `python /app/tools/web_search.py \"your query\"` - Use this to find information on the web.\n"
+            "2. Web Fetch: `python /app/tools/web_fetch.py \"url\"` - Use this to get the full text content of a specific URL.\n"
+            "Always prefer using these tools when you need up-to-date information.\n\n"
+        )
+        
+        full_prompt = system_instructions + "User Message: " + message
+        
         # Note: In the container, we have the host's OAuth credentials mounted
         # and the gemini CLI installed.
-        cmd = ["gemini", "-p", message, "--approval-mode", "yolo", "--output-format", "json"]
+        cmd = [
+            "gemini", 
+            "-p", full_prompt, 
+            "--approval-mode", "yolo", 
+            "--output-format", "json"
+        ]
         
         if self.session_id:
             cmd.extend(["--resume", self.session_id])
