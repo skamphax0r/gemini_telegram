@@ -52,7 +52,7 @@ class GeminiAgent:
             
         try:
             # We run the command and capture the JSON output
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=290)
             
             if result.returncode == 0:
                 output = result.stdout
