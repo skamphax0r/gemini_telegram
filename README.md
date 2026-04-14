@@ -10,21 +10,24 @@ A high-performance, secure, and persistent Telegram bot interface for Gemini AI,
 - **Natural Language Task Scheduler**: Use `/schedule <minutes> <prompt>` to have Gemini perform tasks in the future.
 - **Integrated Web Access**: Gemini can autonomously search the web (via DuckDuckGo) and fetch text content from URLs.
 - **OAuth Subscription Support**: Leverages your existing authenticated Gemini CLI session to use your Gemini Pro subscription.
+- **Automated Approval (YOLO Mode)**: The bot runs in "yolo" mode, allowing Gemini to execute tools and commands autonomously to fulfill your requests.
 
-## Architecture
+## Setup Guide for Beginners
 
-```text
-[Telegram] <-> [TelegramChannel] <-> [Orchestrator] <-> [SQLite DB]
-                                          |
-                                          v
-                                  [ContainerRunner]
-                                          |
-                                          v
-                                  [Gemini Agent (Isolated)]
-                                  (Mounted ~/.gemini & Workspace)
-```
+### 1. Create your Telegram Bot
+If you don't have a bot yet, you need to create one via Telegram:
+1.  Open Telegram and search for **@BotFather**.
+2.  Send the command `/newbot`.
+3.  Follow the instructions to name your bot and give it a username.
+4.  BotFather will provide an **API Token** (e.g., `123456789:ABCdefGHI...`). **Save this token securely.**
 
-## Installation
+### 2. Find your Telegram User ID
+For security, this bot only responds to you. You need your numeric User ID:
+1.  Search for **@userinfobot** in Telegram.
+2.  Send any message to it.
+3.  It will reply with your `Id` (e.g., `1234567890`). **Copy this ID.**
+
+### 3. Installation
 
 1.  **Clone the repository**:
     ```bash
@@ -32,34 +35,34 @@ A high-performance, secure, and persistent Telegram bot interface for Gemini AI,
     cd gemini_telegram
     ```
 
-2.  **Configure Environment**:
-    Create a `.env` file from the example:
-    ```bash
-    cp .env.example .env
-    ```
-    Edit `.env` and set:
-    - `TELEGRAM_BOT_TOKEN`: Your bot token from @BotFather.
-    - `ALLOWED_USER_ID`: Your Telegram User ID (to restrict access).
-
-3.  **Run Installer**:
+2.  **Run Installer**:
+    The installer will build the container image, set up the systemd service, and interactively help you create a `.env` file using the Token and ID you found above.
     ```bash
     chmod +x install.sh
     ./install.sh
     ```
 
-4.  **Start the Service**:
+3.  **Start the Service**:
     ```bash
     sudo systemctl start gemini-telegram-bot.service
     ```
 
-## Bot Commands
+## Usage & Bot Commands
 
-- `/status`: Check system health.
-- `/start`: Initialize the orchestrator.
-- `/clear`: Reset the current Gemini session context.
-- `/memory`: Read the current `GEMINI.md` memory file.
-- `/memory <text>`: Manually update the memory file.
-- `/schedule <minutes> <prompt>`: Schedule a task for the future.
+Once the bot is running, start a chat with it on Telegram.
+
+- `/status`: Check system health, uptime, and versions.
+- `/start`: Initialize the orchestrator for your chat.
+- `/clear`: Reset the current Gemini session context (start a fresh conversation).
+- `/memory`: Read the current `GEMINI.md` memory file for this chat.
+- `/memory <text>`: Manually update the persistent memory file.
+- `/schedule <minutes> <prompt>`: Schedule a task (e.g., `/schedule 60 check the news for any updates on SpaceX`).
+
+### How "YOLO" Mode Works
+The bot utilizes the Gemini CLI's `--approval-mode yolo` flag. This means:
+- When you ask a question that requires searching the web, Gemini will run the search tool automatically.
+- If you ask Gemini to write a script or perform a calculation, it can execute those commands in its isolated container without asking for your permission each time.
+- **Safety**: Because this runs inside a container, it cannot access your host filesystem (except for the specific workspace folder and your OAuth credentials).
 
 ---
 *Built with Gemini CLI.*
