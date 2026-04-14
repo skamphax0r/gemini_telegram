@@ -1,3 +1,8 @@
 .env
 __pycache__/
 user_sessions.json
+*.db
+workspaces/
+test_workspaces/
+node_modules/
+package-lock.json

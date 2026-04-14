@@ -47,9 +47,8 @@ ExecStart=$PYTHON_PATH -u $WORKING_DIR/telegram_bot.py
 WorkingDirectory=$WORKING_DIR
 Restart=always
 User=$(whoami)
-# Note: Load environment variables from .env if present
-# Or add them manually here
-EnvironmentFile=$WORKING_DIR/.env
+# Note: load_dotenv() in src/main.py will load the .env file automatically
+# from the WorkingDirectory.
 
 [Install]
 WantedBy=multi-user.target
