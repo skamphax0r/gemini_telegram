@@ -16,7 +16,10 @@ WORKDIR /workspace
 RUN pip install --no-cache-dir \
     requests \
     google-generativeai \
-    python-dotenv
+    python-dotenv \
+    beautifulsoup4 \
+    lxml \
+    duckduckgo_search
 
 # Install gemini CLI via npm
 RUN npm install -g @google/gemini-cli
