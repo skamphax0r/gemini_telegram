@@ -7,17 +7,18 @@ def main():
     # Simulate some work
     print(f"Agent received: {prompt}")
     
-    # Check if we can see the workspace
-    if os.path.exists("GEMINI.md"):
-        with open("GEMINI.md", "r") as f:
+    # Check if we can see the workspace memory file
+    memory_file = "AGY.md" if os.path.exists("AGY.md") else ("GEMINI.md" if os.path.exists("GEMINI.md") else None)
+    if memory_file:
+        with open(memory_file, "r") as f:
             content = f.read()
-            print(f"Reading GEMINI.md, size: {len(content)}")
+            print(f"Reading {memory_file}, size: {len(content)}")
     
     # Return a JSON result
     result = {
         "status": "success",
         "response": f"Processed: {prompt}",
-        "workspace_check": os.path.exists("GEMINI.md")
+        "workspace_check": memory_file is not None
     }
     
     print(json.dumps(result))

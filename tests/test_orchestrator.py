@@ -5,6 +5,7 @@ from src.database import Database
 from src.channels.base import BaseChannel
 import os
 import shutil
+import time
 
 class MockChannel(BaseChannel):
     def __init__(self):
@@ -26,17 +27,25 @@ class TestOrchestrator(unittest.TestCase):
         self.orchestrator = Orchestrator(self.db, [self.channel], self.runner, allowed_user_id="123")
 
     def tearDown(self):
+        self.orchestrator.executor.shutdown(wait=True)
         if os.path.exists(self.db_path):
             os.remove(self.db_path)
 
+    def _wait_for_messages(self, count=1, timeout=2.0):
+        start = time.time()
+        while len(self.channel.sent_messages) < count and time.time() - start < timeout:
+            time.sleep(0.01)
+
     def test_unauthorized_message(self):
         self.channel.on_message("chat1", "unknown_user", {"text": "/status"})
+        time.sleep(0.05)
         self.assertEqual(len(self.channel.sent_messages), 0)
 
     def test_authorized_status_command(self):
         self.channel.on_message("chat1", "123", {"text": "/status"})
+        self._wait_for_messages(1)
         self.assertEqual(len(self.channel.sent_messages), 1)
-        self.assertIn("Gemini Bot Status", self.channel.sent_messages[0][1])
+        self.assertIn("AGY Bot Status", self.channel.sent_messages[0][1])
         self.assertIn("Python", self.channel.sent_messages[0][1])
         self.assertIn("Uptime", self.channel.sent_messages[0][1])
         
@@ -47,11 +56,12 @@ class TestOrchestrator(unittest.TestCase):
 
     def test_general_message_response(self):
         # Mock successful runner response
-        self.runner.run_agent.return_value = {"status": "success", "response": "Hello from Gemini", "session_id": "new-uuid"}
+        self.runner.run_agent.return_value = {"status": "success", "response": "Hello from AGY", "session_id": "new-uuid"}
         
         self.channel.on_message("chat1", "123", {"text": "hello bot"})
+        self._wait_for_messages(1)
         self.assertEqual(len(self.channel.sent_messages), 1)
-        self.assertEqual(self.channel.sent_messages[0][1], "Hello from Gemini")
+        self.assertEqual(self.channel.sent_messages[0][1], "Hello from AGY")
         
         # Verify session ID stored
         self.assertEqual(self.db.get_session("chat1"), "new-uuid")
@@ -62,10 +72,12 @@ class TestOrchestrator(unittest.TestCase):
         
         # Test write
         self.channel.on_message("chat1", "123", {"text": "/memory This is my memory"})
+        self._wait_for_messages(1)
         self.assertEqual(self.channel.sent_messages[0][1], "Memory updated successfully.")
         
         # Test read
         self.channel.on_message("chat1", "123", {"text": "/memory"})
+        self._wait_for_messages(2)
         self.assertIn("This is my memory", self.channel.sent_messages[1][1])
         
         shutil.rmtree("/tmp/test_workspace")

@@ -7,8 +7,8 @@ from datetime import datetime
 
 class ContainerRunner:
     def __init__(self, 
-                 image_name: str = "gemini-agent:latest", 
-                 runtime: str = "docker",
+                 image_name: str = "agy-agent:latest", 
+                 runtime: str = "auto",
                  base_workspace_dir: Optional[str] = None):
         self.image_name = image_name
         self.runtime = self._detect_runtime() if runtime == "auto" else runtime
@@ -29,12 +29,15 @@ class ContainerRunner:
         os.makedirs(workspace_path, exist_ok=True)
         return workspace_path
 
-    def _ensure_gemini_md(self, workspace_path: str):
+    def _ensure_memory_file(self, workspace_path: str):
+        agy_md_path = os.path.join(workspace_path, "AGY.md")
         gemini_md_path = os.path.join(workspace_path, "GEMINI.md")
-        if not os.path.exists(gemini_md_path):
+        
+        # If neither exists, create AGY.md
+        if not os.path.exists(agy_md_path) and not os.path.exists(gemini_md_path):
             content = (
-                "# Gemini Personal Assistant\n\n"
-                "You are a personal assistant integrated into Telegram. Your goal is to be helpful, efficient, and secure.\n\n"
+                "# AGY Personal Assistant\n\n"
+                "You are a personal assistant integrated into Telegram powered by Antigravity (AGY). Your goal is to be helpful, efficient, and secure.\n\n"
                 "## Capabilities\n"
                 "- **Web Access**: Search with `python /app/tools/web_search.py \"query\"` and fetch with `python /app/tools/web_fetch.py \"url\"`.\n"
                 "- **Filesystem**: You have full read/write access to this `/workspace` folder. Use it to store memory and notes.\n"
@@ -49,45 +52,75 @@ class ContainerRunner:
                 "- Avoid `[links](url)`; paste raw URLs instead.\n\n"
                 "## Memory\n"
                 "- Create files like `preferences.md` to store facts about the user.\n"
-                "- Persist important information here in `GEMINI.md` to remember it across sessions."
+                "- Persist important information here in `AGY.md` to remember it across sessions."
             )
-            with open(gemini_md_path, "w") as f:
+            with open(agy_md_path, "w") as f:
                 f.write(content)
+
+    def _ensure_gemini_md(self, workspace_path: str):
+        self._ensure_memory_file(workspace_path)
 
     def run_agent(self, 
                   chat_jid: str, 
                   prompt: str, 
                   env_vars: Dict[str, str], 
-                  timeout: int = 300) -> Dict[Any, Any]:
+                  timeout: int = 600) -> Dict[Any, Any]:
         workspace_path = self._get_workspace_path(chat_jid)
-        self._ensure_gemini_md(workspace_path)
+        self._ensure_memory_file(workspace_path)
         
         # We mount the src/agent directory to /app in the container
-        # This allows us to update the agent code on the host and have it reflected in the container
         agent_src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "agent"))
         
-        # Mount host Gemini config for OAuth session persistence
-        gemini_config_path = os.path.expanduser("~/.gemini")
+        home_dir = os.path.expanduser("~")
+        gemini_config_path = os.path.join(home_dir, ".gemini")
+        antigravity_config_path = os.path.join(home_dir, ".config", "Antigravity")
+        agy_bin_path = shutil.which("agy")
         
-        container_name = f"gemini-run-{int(datetime.now().timestamp())}"
+        container_name = f"agy-run-{int(datetime.now().timestamp())}"
         
         cmd = [
             "sudo", self.runtime, "run", "--rm",
             "--name", container_name,
+            "--security-opt", "label=disable",
+            "--net=host",
             "-v", f"{workspace_path}:/workspace:Z",
             "-v", f"{agent_src_path}:/app:ro,Z",
             "-w", "/workspace"
         ]
 
+        if agy_bin_path and os.path.exists(agy_bin_path):
+            cmd.extend(["-v", f"{agy_bin_path}:/usr/local/bin/agy:ro,Z"])
+
         if os.path.exists(gemini_config_path):
-            cmd.insert(cmd.index("-w"), "-v")
-            cmd.insert(cmd.index("-w"), f"{gemini_config_path}:/root/.gemini:Z")
+            cmd.extend([
+                "-v", f"{gemini_config_path}:{home_dir}/.gemini:Z",
+                "-v", f"{gemini_config_path}:/root/.gemini:Z"
+            ])
+            
+        if os.path.exists(antigravity_config_path):
+            cmd.extend([
+                "-v", f"{antigravity_config_path}:{home_dir}/.config/Antigravity:ro,Z",
+                "-v", f"{antigravity_config_path}:/root/.config/Antigravity:ro,Z"
+            ])
+
+        # DBus socket forwarding for keyring auth
+        uid = os.getuid()
+        dbus_bus = f"/run/user/{uid}/bus"
+        if os.path.exists(dbus_bus):
+            cmd.extend([
+                "-v", f"{dbus_bus}:{dbus_bus}",
+                "-e", f"DBUS_SESSION_BUS_ADDRESS=unix:path={dbus_bus}"
+            ])
+        elif os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+            cmd.extend(["-e", f"DBUS_SESSION_BUS_ADDRESS={os.environ.get('DBUS_SESSION_BUS_ADDRESS')}"])
+
+        cmd.extend(["-e", f"HOME={home_dir}"])
         
         # Add environment variables
         for key, val in env_vars.items():
             cmd.extend(["-e", f"{key}={val}"])
             
-        # Pass the prompt as an environment variable or via stdin
+        # Pass the prompt as an environment variable
         cmd.extend(["-e", f"AGENT_PROMPT={prompt}"])
         
         cmd.append(self.image_name)
@@ -97,9 +130,7 @@ class ContainerRunner:
             
             if result.returncode == 0:
                 try:
-                    # Expecting the agent to output JSON at the end
                     output_lines = result.stdout.strip().split('\n')
-                    # Find the last line that looks like JSON
                     for line in reversed(output_lines):
                         if line.startswith('{') and line.endswith('}'):
                             return json.loads(line)
@@ -116,12 +147,12 @@ class ContainerRunner:
                 
         except subprocess.TimeoutExpired:
             # Cleanup: kill the container if it timed out
-            subprocess.run([self.runtime, "stop", "-t", "2", container_name], capture_output=True)
+            subprocess.run(["sudo", self.runtime, "stop", "-t", "2", container_name], capture_output=True)
             return {"status": "error", "error": f"Agent timed out after {timeout} seconds"}
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
     def build_image(self):
         agent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "agent"))
-        cmd = ["sudo", self.runtime, "build", "--no-cache", "-t", self.image_name, agent_dir]
+        cmd = ["sudo", self.runtime, "build", "-t", self.image_name, agent_dir]
         subprocess.run(cmd, check=True)

@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Gemini Telegram Bot Installation Script
+# AGY Telegram Bot Installation Script
 set -e
 
-echo "--- Gemini Telegram Bot Installer ---"
+echo "--- AGY Telegram Bot Installer ---"
 
 # 1. Check dependencies
 if ! command -v python3 &> /dev/null; then
@@ -16,30 +16,34 @@ if ! command -v docker &> /dev/null && ! command -v podman &> /dev/null; then
     exit 1
 fi
 
+if ! command -v agy &> /dev/null; then
+    echo "Warning: agy CLI not found in PATH. Please ensure Antigravity CLI (agy) is installed."
+fi
+
 # 2. Install Python dependencies
 echo "Installing Python dependencies..."
 pip install --upgrade pip
 pip install requests python-dotenv
 
 # 3. Build Agent Container Image
-echo "Building Gemini Agent container image..."
+echo "Building AGY Agent container image..."
 # Use sudo for build if needed (assuming user has permissions)
 BUILD_CMD="docker"
 if command -v podman &> /dev/null; then
     BUILD_CMD="podman"
 fi
 
-sudo $BUILD_CMD build -t gemini-agent:latest ./src/agent
+sudo $BUILD_CMD build -t agy-agent:latest ./src/agent
 
 # 4. Setup Service
 echo "Setting up systemd service..."
-SERVICE_FILE="gemini-telegram-bot.service"
+SERVICE_FILE="agy-telegram-bot.service"
 WORKING_DIR=$(pwd)
 PYTHON_PATH=$(which python3)
 
 sudo tee /etc/systemd/system/$SERVICE_FILE <<EOF
 [Unit]
-Description=Gemini CLI Telegram Bot
+Description=AGY CLI Telegram Bot
 After=network.target
 
 [Service]
@@ -61,3 +65,4 @@ echo "--- Installation Complete! ---"
 echo "1. Please ensure your .env file has TELEGRAM_BOT_TOKEN and ALLOWED_USER_ID."
 echo "2. Start the service with: sudo systemctl start $SERVICE_FILE"
 echo "3. View logs with: journalctl -u $SERVICE_FILE -f"
+

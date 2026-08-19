@@ -1,16 +1,16 @@
-# Gemini Telegram Bot (NanoClaw-Style)
+# AGY Telegram Bot (NanoClaw-Style)
 
-A high-performance, secure, and persistent Telegram bot interface for Gemini AI, inspired by the NanoClaw architecture.
+A high-performance, secure, and persistent Telegram bot interface for Antigravity (AGY), inspired by the NanoClaw architecture.
 
 ## Key Features
 
-- **Container Isolation**: All Gemini processing and tool execution (shell commands, web searches) run in isolated Docker/Podman containers.
-- **Persistent Workspace Memory**: Each chat has its own dedicated directory and `GEMINI.md` file, providing long-term memory across sessions.
-- **SQLite Database Backend**: Message history, session mappings, and scheduled tasks are stored in a robust SQLite database.
-- **Natural Language Task Scheduler**: Use `/schedule <minutes> <prompt>` to have Gemini perform tasks in the future.
-- **Integrated Web Access**: Gemini can autonomously search the web (via DuckDuckGo) and fetch text content from URLs.
-- **OAuth Subscription Support**: Leverages your existing authenticated Gemini CLI session to use your Gemini Pro subscription.
-- **Automated Approval (YOLO Mode)**: The bot runs in "yolo" mode, allowing Gemini to execute tools and commands autonomously to fulfill your requests.
+- **Container Isolation**: All AGY processing and tool execution (shell commands, web searches) run in isolated Docker/Podman containers.
+- **Persistent Workspace Memory**: Each chat has its own dedicated directory and `AGY.md` (or `GEMINI.md`) file, providing long-term memory across sessions.
+- **SQLite Database Backend**: Message history, session mappings, and scheduled tasks are stored in a robust SQLite database (`agy_bot.db`).
+- **Natural Language Task Scheduler**: Use `/schedule <minutes> <prompt>` to have AGY perform tasks in the future.
+- **Integrated Web Access**: AGY can autonomously search the web and fetch content from URLs.
+- **Authentication & Subscription Support**: Integrates with your authenticated AGY CLI session to access Antigravity models.
+- **Automated Approval**: The bot runs with `--dangerously-skip-permissions` in its isolated container, allowing AGY to execute tools and commands autonomously to fulfill your requests.
 
 ## Setup Guide for Beginners
 
@@ -35,34 +35,45 @@ For security, this bot only responds to you. You need your numeric User ID:
     cd gemini_telegram
     ```
 
-2.  **Run Installer**:
-    The installer will build the container image, set up the systemd service, and interactively help you create a `.env` file using the Token and ID you found above.
+2.  **Ensure AGY CLI is installed**:
+    Ensure `agy` is available in your PATH (e.g., `agy --version`).
+
+3.  **Run Installer**:
+    The installer will build the container image, set up the systemd service, and configure dependencies.
     ```bash
     chmod +x install.sh
     ./install.sh
     ```
 
-3.  **Start the Service**:
+4.  **Configure Environment**:
+    Create or edit `.env` in the project root:
+    ```env
+    TELEGRAM_BOT_TOKEN="your_bot_token_here"
+    ALLOWED_USER_ID="your_telegram_user_id_here"
+    ```
+
+5.  **Start the Service**:
     ```bash
-    sudo systemctl start gemini-telegram-bot.service
+    sudo systemctl start agy-telegram-bot.service
     ```
 
 ## Usage & Bot Commands
 
 Once the bot is running, start a chat with it on Telegram.
 
-- `/status`: Check system health, uptime, and versions.
+- `/status`: Check system health, uptime, Python version, and AGY CLI version.
 - `/start`: Initialize the orchestrator for your chat.
-- `/clear`: Reset the current Gemini session context (start a fresh conversation).
-- `/memory`: Read the current `GEMINI.md` memory file for this chat.
+- `/clear`: Reset the current AGY conversation session context (start a fresh conversation).
+- `/memory`: Read the current `AGY.md` memory file for this chat.
 - `/memory <text>`: Manually update the persistent memory file.
 - `/schedule <minutes> <prompt>`: Schedule a task (e.g., `/schedule 60 check the news for any updates on SpaceX`).
 
-### How "YOLO" Mode Works
-The bot utilizes the Gemini CLI's `--approval-mode yolo` flag. This means:
-- When you ask a question that requires searching the web, Gemini will run the search tool automatically.
-- If you ask Gemini to write a script or perform a calculation, it can execute those commands in its isolated container without asking for your permission each time.
-- **Safety**: Because this runs inside a container, it cannot access your host filesystem (except for the specific workspace folder and your OAuth credentials).
+### Autonomous Tool Execution
+The bot utilizes the AGY CLI's `--dangerously-skip-permissions` flag within the container environment. This means:
+- When you ask a question that requires searching the web or executing commands, AGY will run the tools automatically.
+- If you ask AGY to write a script or perform a calculation, it executes those commands in its isolated container without requiring manual prompt confirmations.
+- **Safety**: Because this runs inside a container, it cannot access arbitrary host files outside the designated mounts.
 
 ---
-*Built with Gemini CLI.*
+*Built with Antigravity CLI (`agy`).*
+

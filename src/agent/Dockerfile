@@ -1,12 +1,12 @@
 FROM python:3.11-slim
 
-# Install system dependencies and Node.js
+# Install system dependencies, libsecret and dbus for AGY keyring integration
 RUN apt-get update && apt-get install -y \
     curl \
     git \
     gnupg \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
+    libsecret-1-0 \
+    dbus \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -21,11 +21,11 @@ RUN pip install --no-cache-dir \
     lxml \
     duckduckgo_search
 
-# Install gemini CLI via npm
-RUN npm install -g @google/gemini-cli
-
-# Set path (npm global bin is usually in /usr/bin or /usr/local/bin)
+# Set path
 ENV PATH="/usr/local/bin:${PATH}"
+ENV AGY_CLI_TRUST_WORKSPACE=true
+ENV GEMINI_CLI_TRUST_WORKSPACE=true
 
 # Entrypoint script
 CMD ["python", "/app/agent.py"]
+

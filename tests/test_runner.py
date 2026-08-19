@@ -7,7 +7,7 @@ class TestContainerRunner(unittest.TestCase):
     def setUp(self):
         self.workspace_base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "test_workspaces")
         self.runner = ContainerRunner(
-            image_name="gemini-test-agent",
+            image_name="agy-test-agent",
             runtime="auto",
             base_workspace_dir=self.workspace_base
         )
@@ -23,13 +23,17 @@ class TestContainerRunner(unittest.TestCase):
     def test_run_agent(self):
         chat_id = "test_chat_123"
         prompt = "ping" 
-        env_vars = {"GEMINI_SESSION_ID": ""}
+        env_vars = {"AGY_CONVERSATION_ID": ""}
         
         result = self.runner.run_agent(chat_id, prompt, env_vars)
         
-        # Verify GEMINI.md was created (this happens on the host before container run)
+        # Verify AGY.md was created (this happens on the host before container run)
         workspace_path = self.runner._get_workspace_path(chat_id)
-        self.assertTrue(os.path.exists(os.path.join(workspace_path, "GEMINI.md")))
+        has_memory_file = (
+            os.path.exists(os.path.join(workspace_path, "AGY.md")) or 
+            os.path.exists(os.path.join(workspace_path, "GEMINI.md"))
+        )
+        self.assertTrue(has_memory_file)
 
         # Check result - if we have credentials, it should succeed. 
         # In CI, it will likely fail with an auth error, which is acceptable for the runner test.
