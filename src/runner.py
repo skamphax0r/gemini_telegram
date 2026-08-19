@@ -85,12 +85,17 @@ class ContainerRunner:
             os.path.join(home_dir, ".local", "bin", "gemini")
         ]
         agy_bin_path = next((p for p in agy_candidates if p and os.path.isfile(p) and os.access(p, os.X_OK)), None)
+        # Get UID/GID for matching DBus session credentials
+        uid = os.getuid()
+        gid = os.getgid()
+        dbus_bus = f"/run/user/{uid}/bus"
         
         container_name = f"agy-run-{int(datetime.now().timestamp())}"
         
         cmd = [
             "sudo", self.runtime, "run", "--rm",
             "--name", container_name,
+            "--user", f"{uid}:{gid}",
             "--security-opt", "label=disable",
             "--net=host",
             "-v", f"{workspace_path}:/workspace:Z",

@@ -35,7 +35,19 @@ fi
 
 sudo $BUILD_CMD build -t agy-agent:latest ./src/agent
 
-# 4. Setup Service
+# 4. Verify AGY CLI Authentication
+echo "Checking AGY CLI authentication..."
+AGY_BIN=$(command -v agy || echo "$HOME/.local/bin/agy")
+if [ -x "$AGY_BIN" ]; then
+    if ! "$AGY_BIN" -p "ping" --output-format json &>/dev/null; then
+        echo "AGY CLI requires authentication. Starting interactive login..."
+        "$AGY_BIN" -p "ping" || true
+    else
+        echo "AGY CLI authentication verified."
+    fi
+fi
+
+# 5. Setup Service
 echo "Setting up systemd service..."
 SERVICE_FILE="agy-telegram-bot.service"
 WORKING_DIR=$(pwd)
