@@ -74,7 +74,17 @@ class ContainerRunner:
         home_dir = os.path.expanduser("~")
         gemini_config_path = os.path.join(home_dir, ".gemini")
         antigravity_config_path = os.path.join(home_dir, ".config", "Antigravity")
-        agy_bin_path = shutil.which("agy")
+        
+        # Robust candidate resolution for agy binary across system and user PATHs
+        agy_candidates = [
+            shutil.which("agy"),
+            os.path.join(home_dir, ".local", "bin", "agy"),
+            "/usr/local/bin/agy",
+            "/usr/bin/agy",
+            shutil.which("gemini"),
+            os.path.join(home_dir, ".local", "bin", "gemini")
+        ]
+        agy_bin_path = next((p for p in agy_candidates if p and os.path.isfile(p) and os.access(p, os.X_OK)), None)
         
         container_name = f"agy-run-{int(datetime.now().timestamp())}"
         
@@ -89,7 +99,7 @@ class ContainerRunner:
         ]
 
         if agy_bin_path and os.path.exists(agy_bin_path):
-            cmd.extend(["-v", f"{agy_bin_path}:/usr/local/bin/agy:ro,Z"])
+            cmd.extend(["-v", f"{os.path.abspath(agy_bin_path)}:/usr/local/bin/agy:ro,Z"])
 
         if os.path.exists(gemini_config_path):
             cmd.extend([

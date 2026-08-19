@@ -47,6 +47,8 @@ Description=AGY CLI Telegram Bot
 After=network.target
 
 [Service]
+Environment=PATH=$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=$HOME
 ExecStart=$PYTHON_PATH -u $WORKING_DIR/telegram_bot.py
 WorkingDirectory=$WORKING_DIR
 Restart=always
