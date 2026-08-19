@@ -79,12 +79,19 @@ class Orchestrator:
         
         # Get AGY version from host
         try:
-            agy_ver = subprocess.check_output(["agy", "--version"], text=True).strip()
+            home_dir = os.path.expanduser("~")
+            agy_candidates = [
+                shutil.which("agy"),
+                os.path.join(home_dir, ".local", "bin", "agy"),
+                "/usr/local/bin/agy",
+                "/usr/bin/agy",
+                shutil.which("gemini"),
+                os.path.join(home_dir, ".local", "bin", "gemini")
+            ]
+            agy_bin = next((p for p in agy_candidates if p and os.path.isfile(p) and os.access(p, os.X_OK)), "agy")
+            agy_ver = subprocess.check_output([agy_bin, "--version"], text=True, stderr=subprocess.STDOUT).strip()
         except:
-            try:
-                agy_ver = subprocess.check_output(["gemini", "--version", "--skip-trust"], text=True).strip()
-            except:
-                agy_ver = "Unknown"
+            agy_ver = "Unknown"
 
         status_msg = (
             "🤖 *AGY Bot Status*\n"
