@@ -46,7 +46,8 @@ class TaskScheduler:
             
             # Update status to 'running'
             with self.db._get_connection() as conn:
-                conn.execute("UPDATE tasks SET status = 'running', last_run = ? WHERE id = ?", (datetime.now().isoformat(), task_id))
+                with conn:
+                    conn.execute("UPDATE tasks SET status = 'running', last_run = ? WHERE id = ?", (datetime.now().isoformat(), task_id))
             
             try:
                 # Run the prompt via orchestrator
@@ -56,8 +57,10 @@ class TaskScheduler:
                 
                 # Update status to 'completed'
                 with self.db._get_connection() as conn:
-                    conn.execute("UPDATE tasks SET status = 'completed' WHERE id = ?", (task_id,))
+                    with conn:
+                        conn.execute("UPDATE tasks SET status = 'completed' WHERE id = ?", (task_id,))
             except Exception as e:
                 print(f"Failed to execute task {task_id}: {e}")
                 with self.db._get_connection() as conn:
-                    conn.execute("UPDATE tasks SET status = 'failed' WHERE id = ?", (task_id,))
+                    with conn:
+                        conn.execute("UPDATE tasks SET status = 'failed' WHERE id = ?", (task_id,))

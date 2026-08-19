@@ -5,7 +5,7 @@ from src.database import Database
 
 class TestDatabase(unittest.TestCase):
     def setUp(self):
-        self.db_path = "test_gemini_bot.db"
+        self.db_path = "test_agy_bot.db"
         self.db = Database(self.db_path)
 
     def tearDown(self):

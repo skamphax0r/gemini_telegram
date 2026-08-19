@@ -21,11 +21,11 @@ def main():
         sys.exit(1)
 
     # 1. Initialize Database
-    db = Database("gemini_bot.db")
+    db = Database()
     
     # 2. Initialize Container Runner
     runner = ContainerRunner(
-        image_name="gemini-agent:latest",
+        image_name="agy-agent:latest",
         runtime="auto",
         base_workspace_dir=os.path.join(os.getcwd(), "workspaces")
     )
@@ -46,7 +46,7 @@ def main():
 
     # Handle termination signals
     def signal_handler(sig, frame):
-        print("\nShutting down Gemini Bot...")
+        print("\nShutting down AGY Bot...")
         scheduler.stop()
         orchestrator.stop()
         sys.exit(0)
@@ -54,7 +54,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    print("--- Gemini Bot Starting ---")
+    print("--- AGY Bot Starting ---")
     print(f"Allowed User ID: {allowed_user_id or 'Any'}")
     
     # Start background threads
