@@ -6,3 +6,4 @@ workspaces/
 test_workspaces/
 node_modules/
 package-lock.json
+credentials/

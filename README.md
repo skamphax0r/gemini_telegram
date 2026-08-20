@@ -52,7 +52,17 @@ For security, this bot only responds to you. You need your numeric User ID:
     ALLOWED_USER_ID="your_telegram_user_id_here"
     ```
 
-5.  **Start the Service**:
+5.  **Shared Credentials & Integrations (e.g. Google Calendar)**:
+    Place shared integration credentials (such as Google OAuth client JSON keys or tokens) into the `credentials/` folder in the repository root:
+    ```bash
+    mkdir -p credentials
+    chmod 700 credentials
+    # e.g., place your Google Cloud OAuth keys:
+    # cp /path/to/agy-access.json credentials/agy-access.json
+    ```
+    > **Note:** The `credentials/` folder is included in `.gitignore` by default to prevent accidental commits of secret keys and tokens. It is automatically mounted into the agent container at runtime.
+
+6.  **Start the Service**:
     ```bash
     sudo systemctl start agy-telegram-bot.service
     ```

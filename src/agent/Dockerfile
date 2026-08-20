@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     gnupg \
+    nodejs \
+    npm \
     libsecret-1-0 \
     dbus \
     && rm -rf /var/lib/apt/lists/*

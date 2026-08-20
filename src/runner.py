@@ -112,6 +112,29 @@ class ContainerRunner:
                 "-v", f"{gemini_config_path}:/root/.gemini:Z"
             ])
             
+        credentials_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "credentials"))
+        google_cal_config_path = os.path.join(home_dir, ".config", "google-calendar-mcp")
+
+        if os.path.exists(credentials_path):
+            cmd.extend([
+                "-v", f"{credentials_path}:{home_dir}/credentials:Z",
+                "-v", f"{credentials_path}:/credentials:Z",
+                "-v", f"{credentials_path}:/workspace/credentials:ro,Z"
+            ])
+
+        if os.path.exists(google_cal_config_path):
+            cmd.extend([
+                "-v", f"{google_cal_config_path}:{home_dir}/.config/google-calendar-mcp:Z",
+                "-v", f"{google_cal_config_path}:/root/.config/google-calendar-mcp:Z"
+            ])
+
+        gmail_mcp_config_path = os.path.join(home_dir, ".gmail-mcp")
+        if os.path.exists(gmail_mcp_config_path):
+            cmd.extend([
+                "-v", f"{gmail_mcp_config_path}:{home_dir}/.gmail-mcp:Z",
+                "-v", f"{gmail_mcp_config_path}:/root/.gmail-mcp:Z"
+            ])
+
         if os.path.exists(antigravity_config_path):
             cmd.extend([
                 "-v", f"{antigravity_config_path}:{home_dir}/.config/Antigravity:ro,Z",

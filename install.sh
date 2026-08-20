@@ -25,7 +25,12 @@ echo "Installing Python dependencies..."
 pip install --upgrade pip
 pip install requests python-dotenv
 
-# 3. Build Agent Container Image
+# 3. Setup Shared Credentials Directory
+echo "Setting up shared credentials directory..."
+mkdir -p credentials
+chmod 700 credentials
+
+# 4. Build Agent Container Image
 echo "Building AGY Agent container image..."
 # Use sudo for build if needed (assuming user has permissions)
 BUILD_CMD="docker"
@@ -35,7 +40,7 @@ fi
 
 sudo $BUILD_CMD build -t agy-agent:latest ./src/agent
 
-# 4. Verify AGY CLI Authentication
+# 5. Verify AGY CLI Authentication
 echo "Checking AGY CLI authentication..."
 AGY_BIN=$(command -v agy || echo "$HOME/.local/bin/agy")
 if [ -x "$AGY_BIN" ]; then
@@ -47,7 +52,7 @@ if [ -x "$AGY_BIN" ]; then
     fi
 fi
 
-# 5. Setup Service
+# 6. Setup Service
 echo "Setting up systemd service..."
 SERVICE_FILE="agy-telegram-bot.service"
 WORKING_DIR=$(pwd)
@@ -77,6 +82,7 @@ sudo systemctl enable $SERVICE_FILE
 
 echo "--- Installation Complete! ---"
 echo "1. Please ensure your .env file has TELEGRAM_BOT_TOKEN and ALLOWED_USER_ID."
-echo "2. Start the service with: sudo systemctl start $SERVICE_FILE"
-echo "3. View logs with: journalctl -u $SERVICE_FILE -f"
+echo "2. Place any shared integration credentials (e.g. Google Calendar OAuth keys) in ./credentials/"
+echo "3. Start the service with: sudo systemctl start $SERVICE_FILE"
+echo "4. View logs with: journalctl -u $SERVICE_FILE -f"
 
