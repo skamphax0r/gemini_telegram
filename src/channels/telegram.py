@@ -32,7 +32,7 @@ class TelegramChannel(BaseChannel):
             text = text[:3997] + "..."
         data = {"chat_id": chat_id, "text": text}
         try:
-            requests.post(f"{self.url}/sendMessage", data=data)
+            requests.post(f"{self.url}/sendMessage", data=data, timeout=30)
         except Exception as e:
             print(f"Error sending message to Telegram: {e}")
 
@@ -41,7 +41,7 @@ class TelegramChannel(BaseChannel):
             return # Telegram typing times out automatically
         data = {"chat_id": chat_id, "action": "typing"}
         try:
-            requests.post(f"{self.url}/sendChatAction", data=data)
+            requests.post(f"{self.url}/sendChatAction", data=data, timeout=10)
         except Exception as e:
             print(f"Error setting typing on Telegram: {e}")
 
@@ -49,7 +49,7 @@ class TelegramChannel(BaseChannel):
         while self.running:
             try:
                 params = {"timeout": 30, "offset": self.offset}
-                r = requests.get(f"{self.url}/getUpdates", params=params)
+                r = requests.get(f"{self.url}/getUpdates", params=params, timeout=40)
                 updates = r.json()
                 if updates.get("ok"):
                     for update in updates.get("result", []):

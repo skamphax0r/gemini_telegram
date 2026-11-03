@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+import json
 import os
 import sys
 import subprocess
@@ -18,9 +19,17 @@ class Orchestrator:
         self.allowed_user_id = allowed_user_id
         self.start_time = datetime.now()
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+        self._locks_mutex = threading.Lock()
+        self._chat_locks: Dict[str, threading.Lock] = {}
         
         for channel in self.channels:
             channel.set_on_message(self.handle_message)
+
+    def _get_chat_lock(self, chat_id: str) -> threading.Lock:
+        with self._locks_mutex:
+            if chat_id not in self._chat_locks:
+                self._chat_locks[chat_id] = threading.Lock()
+            return self._chat_locks[chat_id]
 
     def handle_message(self, chat_id: str, sender: str, raw_msg: dict):
         # Security check
@@ -64,6 +73,8 @@ class Orchestrator:
             self.handle_memory_command(chat_id, content)
         elif content.startswith("/schedule"):
             self.handle_schedule_command(chat_id, content)
+        elif content.startswith("/subagent") or content.startswith("/delegate"):
+            self.handle_subagent_command(chat_id, content)
         else:
             self.execute_prompt(chat_id, content)
 
@@ -122,9 +133,75 @@ class Orchestrator:
         except ValueError:
             self.send_response(chat_id, "Invalid number of minutes.")
 
+    def handle_subagent_command(self, chat_id: str, content: str):
+        """Handle /subagent <prompt> or /delegate <prompt>"""
+        parts = content.split(" ", 1)
+        if len(parts) < 2 or not parts[1].strip():
+            self.send_response(chat_id, "Usage: /subagent <prompt>")
+            return
+        task_prompt = parts[1].strip()
+        self.send_response(
+            chat_id,
+            "🚀 Delegated to a background subagent (30m timeout). I'll send the results here as soon as it finishes."
+        )
+        self.executor.submit(self.execute_subagent_prompt, chat_id, task_prompt)
+
+    def _drain_subagent_queue(self, chat_id: str):
+        """Check if the main agent queued any detached background subagent tasks during its run."""
+        try:
+            workspace_path = self.runner._get_workspace_path(chat_id)
+            if not isinstance(workspace_path, str) or not os.path.isdir(workspace_path):
+                return
+            queue_file = os.path.join(workspace_path, ".subagent_tasks.jsonl")
+            if not os.path.isfile(queue_file):
+                return
+            with open(queue_file, "r", encoding="utf-8") as f:
+                lines = [line.strip() for line in f if line.strip()]
+            os.remove(queue_file)
+            for line in lines:
+                try:
+                    data = json.loads(line)
+                    task_prompt = data.get("prompt", "").strip()
+                    if task_prompt:
+                        self.executor.submit(self.execute_subagent_prompt, chat_id, task_prompt)
+                except Exception as e:
+                    print(f"Error parsing queued subagent task: {e}")
+        except Exception as e:
+            print(f"Error draining subagent queue: {e}")
+
+    def execute_subagent_prompt(self, chat_id: str, prompt: str, timeout: int = 1800):
+        """Run a delegated prompt in an isolated subagent container/session without blocking the main conversation."""
+        try:
+            env_vars = {
+                "AGY_CONVERSATION_ID": "",
+                "AGY_SESSION_ID": "",
+                "GEMINI_SESSION_ID": "",
+                "AGY_AGENT_TIMEOUT": str(max(60, timeout - 10)),
+            }
+            result = self.runner.run_agent(chat_id, prompt, env_vars, timeout=timeout)
+            if result.get("status") == "success":
+                response_text = result.get("response", "Subagent completed with no output.")
+                self.send_response(chat_id, response_text)
+                try:
+                    self.db.store_message(
+                        chat_jid=chat_id,
+                        sender="bot",
+                        content=response_text,
+                        timestamp=datetime.now().isoformat(),
+                        is_from_me=True,
+                        is_bot_message=True
+                    )
+                except Exception as e:
+                    print(f"Error storing subagent response in DB: {e}")
+            else:
+                self.send_response(chat_id, f"Subagent Error: {result.get('error', 'Unknown subagent error')}")
+        except Exception as e:
+            self.send_response(chat_id, f"Subagent Error: {e}")
+
     def execute_prompt(self, chat_id: str, prompt: str):
         """Invoke AGY Agent in container and handle response."""
         channel = self.find_channel_for_chat(chat_id)
+        chat_lock = self._get_chat_lock(chat_id)
         
         # Start a background thread to keep the typing indicator active
         typing_active = True
@@ -139,42 +216,46 @@ class Orchestrator:
         typing_thread.start()
 
         try:
-            # Get session ID for context persistence
-            session_id = self.db.get_session(chat_id)
-            env_vars = {
-                "AGY_CONVERSATION_ID": session_id if session_id else "",
-                "AGY_SESSION_ID": session_id if session_id else "",
-                "GEMINI_SESSION_ID": session_id if session_id else ""
-            }
-            
-            result = self.runner.run_agent(chat_id, prompt, env_vars)
-            
-            if result.get("status") == "success":
-                response_text = result.get("response", "No response.")
-                self.send_response(chat_id, response_text)
+            with chat_lock:
+                # Get session ID for context persistence
+                session_id = self.db.get_session(chat_id)
+                env_vars = {
+                    "AGY_CONVERSATION_ID": session_id if session_id else "",
+                    "AGY_SESSION_ID": session_id if session_id else "",
+                    "GEMINI_SESSION_ID": session_id if session_id else ""
+                }
                 
-                # Store bot response in DB
-                try:
-                    self.db.store_message(
-                        chat_jid=chat_id,
-                        sender="bot",
-                        content=response_text,
-                        timestamp=datetime.now().isoformat(),
-                        is_from_me=True,
-                        is_bot_message=True
-                    )
-                except Exception as e:
-                    print(f"Error storing bot response in DB: {e}")
+                result = self.runner.run_agent(chat_id, prompt, env_vars)
                 
-                # Update session ID if one was returned
-                new_session_id = result.get("session_id")
-                if new_session_id:
+                if result.get("status") == "success":
+                    response_text = result.get("response", "No response.")
+                    self.send_response(chat_id, response_text)
+                    
+                    # Store bot response in DB
                     try:
-                        self.db.set_session(chat_id, new_session_id)
+                        self.db.store_message(
+                            chat_jid=chat_id,
+                            sender="bot",
+                            content=response_text,
+                            timestamp=datetime.now().isoformat(),
+                            is_from_me=True,
+                            is_bot_message=True
+                        )
                     except Exception as e:
-                        print(f"Error updating session in DB: {e}")
-            else:
-                self.send_response(chat_id, f"Error: {result.get('error', 'Unknown agent error')}")
+                        print(f"Error storing bot response in DB: {e}")
+                    
+                    # Update session ID if one was returned
+                    new_session_id = result.get("session_id")
+                    if new_session_id:
+                        try:
+                            self.db.set_session(chat_id, new_session_id)
+                        except Exception as e:
+                            print(f"Error updating session in DB: {e}")
+                else:
+                    self.send_response(chat_id, f"Error: {result.get('error', 'Unknown agent error')}")
+                
+                # Drain any detached subagent tasks queued during this run
+                self._drain_subagent_queue(chat_id)
         finally:
             typing_active = False
             if channel:
