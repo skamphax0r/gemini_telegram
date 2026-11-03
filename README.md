@@ -8,6 +8,8 @@ A high-performance, secure, and persistent Telegram bot interface for Antigravit
 - **Persistent Workspace Memory**: Each chat has its own dedicated directory and `AGY.md` (or `GEMINI.md`) file, providing long-term memory across sessions.
 - **SQLite Database Backend**: Message history, session mappings, and scheduled tasks are stored in a robust SQLite database (`agy_bot.db`).
 - **Natural Language Task Scheduler**: Use `/schedule <minutes> <prompt>` to have AGY perform tasks in the future.
+- **Non-Blocking Subagent Delegation**: Use `/subagent <prompt>` (or `/delegate <prompt>`) or let AGY autonomously delegate long-running tasks to an isolated background subagent container (30-minute timeout) so the main chat never blocks or times out.
+- **Self-Healing Session Queue & Timeout Recovery**: Automatically purges corrupted/zero-byte message queue files before each turn so background tasks and subagents wake up reliably, and recovers partial progress from `transcript.jsonl` if a turn ever hits the time limit.
 - **Integrated Web Access**: AGY can autonomously search the web and fetch content from URLs.
 - **Authentication & Subscription Support**: Integrates with your authenticated AGY CLI session to access Antigravity models.
 - **Automated Approval**: The bot runs with `--dangerously-skip-permissions` in its isolated container, allowing AGY to execute tools and commands autonomously to fulfill your requests.
@@ -77,6 +79,12 @@ Once the bot is running, start a chat with it on Telegram.
 - `/memory`: Read the current `AGY.md` memory file for this chat.
 - `/memory <text>`: Manually update the persistent memory file.
 - `/schedule <minutes> <prompt>`: Schedule a task (e.g., `/schedule 60 check the news for any updates on SpaceX`).
+- `/subagent <prompt>` (or `/delegate <prompt>`): Run a long-running prompt asynchronously in an isolated background subagent container (30-minute timeout) without blocking your main conversation.
+
+### Subagent Delegation & Long-Running Tasks
+For tasks that take several minutes (such as installing packages, compiling code, or running large batch operations):
+- **Autonomous Delegation**: The main agent can invoke `python /app/tools/delegate_subagent.py "<task prompt>"` (or use native `invoke_subagent` for in-turn delegation) to hand off heavy work to a detached background subagent and reply immediately.
+- **Direct Command**: You can trigger a detached background subagent directly from Telegram using `/subagent <prompt>` or `/delegate <prompt>`.
 
 ### Autonomous Tool Execution
 The bot utilizes the AGY CLI's `--dangerously-skip-permissions` flag within the container environment. This means:
