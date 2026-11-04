@@ -22,8 +22,8 @@ fi
 
 # 2. Install Python dependencies
 echo "Installing Python dependencies..."
-pip install --upgrade pip
-pip install requests python-dotenv
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
 
 # 3. Setup Shared Credentials Directory
 echo "Setting up shared credentials directory..."
