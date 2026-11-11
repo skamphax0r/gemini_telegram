@@ -100,6 +100,7 @@ class ContainerRunner:
             "--security-opt", "label=disable",
             "--net=host",
             "-v", f"{workspace_path}:/workspace:Z",
+            "-v", f"{workspace_path}:{workspace_path}",
             "-v", f"{agent_src_path}:/app:ro,Z",
             "-w", "/workspace"
         ]
@@ -120,7 +121,8 @@ class ContainerRunner:
             cmd.extend([
                 "-v", f"{credentials_path}:{home_dir}/credentials:Z",
                 "-v", f"{credentials_path}:/credentials:Z",
-                "-v", f"{credentials_path}:/workspace/credentials:ro,Z"
+                "-v", f"{credentials_path}:/workspace/credentials:ro,Z",
+                "-v", f"{credentials_path}:{credentials_path}:ro"
             ])
 
         if os.path.exists(google_cal_config_path):
